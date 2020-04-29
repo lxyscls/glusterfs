@@ -121,3 +121,5 @@ xlators/features/cloudsync/src/cloudsync-autogen-fops.c
 xlators/features/cloudsync/src/cloudsync-autogen-fops.h
 xlators/features/utime/src/utime-autogen-fops.c
 xlators/features/utime/src/utime-autogen-fops.h
+.vscode/c_cpp_properties.json
+.vscode/settings.json
