@@ -2,31 +2,24 @@
 #define _HS_H
 
 #include <stdint.h>
-#include <uuid/uuid.h>
 #include <dirent.h>
 
-#include <glusterfs/compat.h>
 #include <glusterfs/glusterfs.h>
-#include <glusterfs/list.h>
-#include <glusterfs/mem-pool.h>
 #include <glusterfs/dict.h>
+#include <glusterfs/refcount.h>
+#include <glusterfs/compat.h>
 #include <glusterfs/iatt.h>
 
 struct hs_ctx {
-    size_t hashsize;
-    struct list_head *hs_hash;
+    dict_t *hs_dict;
 
     struct hs *root;
 };
 
 struct hs {
-    struct hs_ctx *ctx;
+    GF_REF_DECL;
 
-    struct list_head list;
-    struct list_head children;
-    struct list_head hash;
-
-    uuid_t gfid;
+    char *gfid;
     char *real_path;
     struct hs *parent;
 
@@ -65,5 +58,9 @@ struct hs_private {
 
     struct hs_ctx *ctx;
 };
+
+struct hs_ctx *hs_ctx_init(const char *rpath);
+void hs_ctx_free(struct hs_ctx *ctx);
+struct hs *hs_init(const char *rpath, struct hs *parent);
 
 #endif
