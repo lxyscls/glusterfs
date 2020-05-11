@@ -61,6 +61,7 @@ struct hs_private {
 
 struct hs_ctx *hs_ctx_init(const char *rpath);
 void hs_ctx_free(struct hs_ctx *ctx);
+int hs_print(dict_t *d, char *k, data_t *v, void *_unused);
 struct hs *hs_init(const char *rpath, struct hs *parent);
 
 #endif

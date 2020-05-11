@@ -1,16 +1,32 @@
 #include <sys/stat.h>
 #include <uuid/uuid.h>
 #include <sys/types.h>
-#include <attr/xattr.h>
 #include <errno.h>
 
 #include <glusterfs/xlator.h>
 #include <glusterfs/mem-pool.h>
 #include <glusterfs/syscall.h>
+#include <glusterfs/compat-errno.h>
 
 #include "hs.h"
 #include "hs-mem-types.h"
 #include "hs-messages.h"
+
+int32_t
+mem_acct_init(xlator_t *this) {
+    int ret = -1;
+
+    if (!this)
+        return ret;
+
+    ret = xlator_mem_acct_init(this, gf_hs_mt_end + 1);
+
+    if (ret != 0) {
+        return ret;
+    }
+
+    return ret;
+}
 
 int
 haystack_init(xlator_t *this) {
@@ -77,6 +93,8 @@ haystack_init(xlator_t *this) {
     if (!private->ctx) {
         ret = -1;
         goto out;
+    } else {
+        dict_foreach(private->ctx->hs_dict, hs_print, NULL);
     }
 
     this->private = private;
@@ -107,6 +125,8 @@ haystack_fini(xlator_t *this) {
     GF_FREE(private);
 }
 
+struct xlator_fops fops;
+
 struct volume_options hs_options[] = {
     {.key = {"directory"},
      .type = GF_OPTION_TYPE_PATH,
@@ -117,5 +137,7 @@ struct volume_options hs_options[] = {
 xlator_api_t xlator_api = {
     .init = haystack_init,
     .fini = haystack_fini,
+    .mem_acct_init = mem_acct_init,
+    .fops = &fops,
     .options = hs_options,
 };

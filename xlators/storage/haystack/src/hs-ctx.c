@@ -14,6 +14,10 @@ static void
 hs_free(void *to_free) {
     struct hs *hs = (struct hs *)to_free;
 
+    if (!hs) {
+        return;
+    }
+
     GF_FREE(hs->gfid);
     GF_FREE(hs->real_path);
     GF_FREE(hs);
@@ -99,13 +103,23 @@ hs_scan(const char *rpath, struct hs *parent, struct hs_ctx *ctx) {
     }
 
     ret = dict_setn(ctx->hs_dict, hs->gfid, GF_UUID_BUF_SIZE-1, data);
-
-    if (!ret) {
+    if (ret) {
         GF_REF_PUT(hs);
         return NULL;
     }
 
     return hs;
+}
+
+int
+hs_print(dict_t *d, char *k, data_t *v, void *_unused) {
+    struct hs *hs = (struct hs *)v->data;
+
+    if (hs) {
+        printf("%s : %s\n", hs->gfid, hs->real_path);
+    }
+
+    return 0;
 }
 
 static int
@@ -131,7 +145,6 @@ hs_ctx_free(struct hs_ctx *ctx) {
 
 struct hs_ctx *
 hs_ctx_init(const char *rpath) {
-    int i = 0;
     struct hs_ctx *ctx = NULL;
 
     ctx = (void *)GF_CALLOC(1, sizeof(struct hs_ctx), gf_hs_mt_hs_ctx);
