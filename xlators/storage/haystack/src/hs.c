@@ -30,7 +30,7 @@ mem_acct_init(xlator_t *this) {
 
 int
 haystack_init(xlator_t *this) {
-    int ret = 0;
+    int ret = -1;
     struct stat buf;
     uuid_t gfid;
     ssize_t size = -1;
@@ -55,7 +55,7 @@ haystack_init(xlator_t *this) {
     private->base_path_length = strlen(private->base_path);
 
     ret = sys_stat(private->base_path, &buf);
-    if ((ret != 0) || !S_ISDIR(buf.st_mode)) {
+    if (ret != 0 || !S_ISDIR(buf.st_mode)) {
         ret = -1;
         goto out;
     }

@@ -4,11 +4,14 @@
 #include <stdint.h>
 #include <dirent.h>
 
-#include <glusterfs/glusterfs.h>
 #include <glusterfs/dict.h>
 #include <glusterfs/refcount.h>
 #include <glusterfs/compat.h>
 #include <glusterfs/iatt.h>
+#include <glusterfs/locking.h>
+
+#define VERSION 0x00000001
+#define DELETED (1<<0)
 
 struct hs_ctx {
     dict_t *hs_dict;
@@ -19,34 +22,49 @@ struct hs_ctx {
 struct hs {
     GF_REF_DECL;
 
-    char *gfid;
+    uuid_t gfid;
     char *real_path;
     struct hs *parent;
 
     dict_t *mem;
-    int logfd;
-    int idxfd;
+
+    int log_fd;
+    int idx_fd;
+    uint64_t log_offset;
 };
+
+struct hs_super {
+    int version;
+    uuid_t gfid;
+} __attribute__ ((packed));
 
 struct hs_needle {
-    int header;
-    char gfid[GF_UUID_BUF_SIZE];
-    char name[NAME_MAX+1];
+    uuid_t gfid;
     struct iatt buf;
+    uint8_t flags;
+    uint8_t name_len;
     uint32_t size;
-    char *data;
-    int footer;
-};
+    char data[0]; /* name + data */
+} __attribute__ ((packed));
 
 struct hs_idx {
-    char gfid[GF_UUID_BUF_SIZE];
-    uint64_t offset;
+    uuid_t gfid;
+    struct iatt buf;
+    uint8_t name_len;
     uint32_t size;
-};
+    uint64_t offset;
+    char name[0];
+} __attribute__ ((packed));
 
 struct hs_mem_idx {
-    uint64_t offset;
+    GF_REF_DECL;
+
+    gf_lock_t lock;
+    struct iatt buf;
+    uint8_t name_len;
     uint32_t size;
+    uint64_t offset;
+    char name[0];
 };
 
 struct hs_private {
