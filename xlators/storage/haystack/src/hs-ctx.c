@@ -17,6 +17,10 @@
 #include "hs.h"
 #include "hs-mem-types.h"
 
+#define COFLAG (O_RDWR | O_CREAT | O_APPEND)
+#define OFLAG (O_RDWR | O_APPEND)
+#define MODE (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
+
 static void 
 hs_mem_idx_free(void *to_free) {
     struct hs_mem_idx *mem_idx = (struct hs *)to_free;
@@ -42,30 +46,27 @@ hs_mem_idx_purge(dict_t *d, char *k, data_t *v, void *_unused) {
 
 struct hs_idx *
 hs_idx_init_from_needle(struct hs_needle *needle, uint64_t offset) {
-    struct hs_idx *idx = NULL;
+    static struct hs_idx idx = {0};
 
     if (!needle) {
         goto out;
     }
 
-    idx = GF_CALLOC(1, sizeof(*idx)+needle->name_len, gf_hs_mt_hs_idx);
-    if (!idx) {
-        goto out;
-    }
-
-    gf_uuid_copy(idx->gfid, needle->gfid);
-    idx->buf = needle->buf;
-    idx->name_len = needle->name_len;
-    idx->size = needle->size;
+    gf_uuid_copy(idx.gfid, needle->gfid);
+    idx.buf = needle->buf;
+    idx.name_len = needle->name_len;
+    idx.size = needle->size;
     if (needle->flags & DELETED) {
-        idx->offset = 0;
+        idx.offset = 0;
     } else {
-        idx->offset = offset;
+        idx.offset = offset;
     }
-    gf_strncpy(idx->name, needle->data, needle->name_len);
+    gf_strncpy(idx.name, needle->data, needle->name_len);
+
+    return &idx;
 
 out:
-    return idx;
+    return NULL;
 }
 
 struct hs_mem_idx *
@@ -120,19 +121,18 @@ out:
 
 static int
 hs_slow_build(struct hs *hs) {
-    return 0;
-}
-
-static int
-hs_orphan_build(struct hs *hs) {
     int ret = -1;
-    int fd = -1;
-    ssize_t size = -1;
     char *log_rpath = NULL;
-    struct hs_needle *needle = NULL;
+    char *idx_rpath = NULL;
+    int log_fd = -1;
+    int idx_fd = -1;
+    struct stat stbuf = {0};
+    struct hs_super super = {0};
+    ssize_t size = -1;
+    ssize_t offset = 0;
+    struct hs_needle needle = {0};
     struct hs_mem_idx *mem_idx = NULL;
     struct hs_idx *idx = NULL;
-    gf_boolean_t append_idx = _gf_true;
 
     log_rpath = GF_CALLOC(1, strlen(hs->real_path)+1+strlen(".log")+1, gf_common_mt_char);
     if (!log_rpath) {
@@ -141,35 +141,64 @@ hs_orphan_build(struct hs *hs) {
     }
     sprintf(log_rpath, "%s/.log", hs->real_path);
 
-    needle = GF_CALLOC(1, sizeof(*needle)+NAME_MAX+1, gf_hs_mt_hs_needle);
-    if (!needle) {
+    idx_rpath = GF_CALLOC(1, strlen(hs->real_path)+1+strlen(".idx")+1, gf_common_mt_char);
+    if (!idx_rpath) {
         ret = -1;
         goto err;
-    }    
+    }
+    sprintf(idx_rpath, "%s/.idx", hs->real_path);
 
-    fd = sys_open(log_rpath, O_RDWR | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    if (fd == -1) {
+    log_fd = sys_open(log_rpath, OFLAG, MODE);
+    if (log_fd == -1) {
+        ret = -1;
+        goto err;
+    }
+    
+    ret = sys_stat(idx_rpath, &stbuf);
+    if (!ret) {
+        sys_unlink(idx_rpath);
+    }
+    
+    idx_fd = sys_open(idx_rpath, COFLAG, MODE);
+    if (idx_fd == -1) {
         ret = -1;
         goto err;
     }
 
+    super.version = VERSION;
+    gf_uuid_copy(super.gfid, hs->gfid);
+
+    size = sys_pwrite(idx_fd, &super, sizeof(super), 0);
+    if (size != sizeof(super)) {
+        ret = -1;
+        goto err;
+    }    
+
+    size = sys_pread(log_fd, &super, sizeof(super), offset);
+    if (size != sizeof(super) || super.version != VERSION || gf_uuid_compare(super.gfid, hs->gfid)) {
+        ret = -1;
+        goto err;
+    }
+
+    offset += size;
+
     while (_gf_true) {
-        size = sys_pread(fd, needle, sizeof(*needle)+NAME_MAX+1, hs->log_offset);
+        size = sys_pread(log_fd, &needle, sizeof(needle)+NAME_MAX+1, offset);
         if (size == 0) {
             break;
         }
 
         /* broken file */
-        if (size < sizeof(*needle)) {          
+        if (size < sizeof(needle)) {          
             ret = -1;
             goto err;
         }
 
-        if (!gf_uuid_is_null(needle->gfid)) {         
-            ret = dict_get_bin(hs->mem, uuid_utoa(needle->gfid), &mem_idx);
-            if (needle->flags & DELETED) {            
+        if (!gf_uuid_is_null(needle.gfid)) {         
+            ret = dict_get_bin(hs->mem, uuid_utoa(needle.gfid), &mem_idx);
+            if (needle.flags & DELETED) {            
                 if (!ret) {                    
-                    dict_del(hs->mem, uuid_utoa(needle->gfid));
+                    dict_del(hs->mem, uuid_utoa(needle.gfid));
                     GF_REF_PUT(mem_idx);
                 }
             } else {
@@ -177,9 +206,9 @@ hs_orphan_build(struct hs *hs) {
                     GF_REF_PUT(mem_idx);                
                 }
 
-                mem_idx = hs_mem_idx_init_from_needle(needle, hs->log_offset);
+                mem_idx = hs_mem_idx_init_from_needle(&needle, offset);
                 if (mem_idx) {
-                    ret = dict_set_static_bin(hs->mem, uuid_utoa(needle->gfid), mem_idx, sizeof(*mem_idx)+mem_idx->name_len);
+                    ret = dict_set_static_bin(hs->mem, uuid_utoa(needle.gfid), mem_idx, sizeof(*mem_idx)+mem_idx->name_len);
                     if (ret) {
                         GF_REF_PUT(mem_idx);
                         ret = -1;
@@ -189,32 +218,117 @@ hs_orphan_build(struct hs *hs) {
                     ret = -1;
                     goto err; /* log for mem_idx_init fail */
                 }
-                
-                hs->log_offset += (sizeof(struct hs_needle) + needle->name_len + needle->size);
             }
 
-            /* Fatal that idx seq != log seq */
-            if (append_idx) {
-                idx = hs_idx_init_from_needle(needle, hs->log_offset);
-                if (idx) {
-                    size = sys_write(hs->idx_fd, idx, sizeof(*idx)+idx->name_len);
-                    if (size != sizeof(*idx)+idx->name_len) {
-                        append_idx = _gf_false; /* log for write fail */
-                    }
-                } else {
-                    append_idx = _gf_false; /* log for init fail */
-                }
+            /* idx seq != log seq is fatal! */
+            idx = hs_idx_init_from_needle(&needle, offset);
+            size = sys_write(hs->idx_fd, idx, sizeof(*idx)+idx->name_len);
+            if (size != sizeof(*idx)+idx->name_len) {
+                ret = -1;
+                goto err; /* log for write fail */
             }
         }
+
+        offset += (sizeof(struct hs_needle) + needle.name_len + needle.size);
+    }
+
+    hs->log_fd = log_fd;
+    hs->idx_fd = idx_fd;
+    GF_FREE(log_rpath);
+    GF_FREE(idx_rpath); 
+    
+    return 0;
+
+err:
+    if (log_fd >= 0) {
+        sys_close(log_fd);
+    }
+    if (idx_fd >= 0) {
+        sys_close(idx_fd);
+    }
+    dict_foreach(hs->mem, hs_mem_idx_purge, NULL);
+    GF_FREE(log_rpath);
+    GF_FREE(idx_rpath);
+
+    return ret;
+}
+
+static int
+hs_orphan_build(struct hs *hs) {
+    int ret = -1;
+    int fd = -1;
+    ssize_t size = -1;
+    char *log_rpath = NULL;
+    struct hs_needle needle = {0};
+    struct hs_mem_idx *mem_idx = NULL;
+    struct hs_idx *idx = NULL;
+    ssize_t offset = 0;
+
+    log_rpath = GF_CALLOC(1, strlen(hs->real_path)+1+strlen(".log")+1, gf_common_mt_char);
+    if (!log_rpath) {
+        ret = -1;
+        goto err;
+    }
+    sprintf(log_rpath, "%s/.log", hs->real_path);
+
+    fd = sys_open(log_rpath, OFLAG, MODE);
+    if (fd == -1) {
+        ret = -1;
+        goto err;
+    }
+
+    offset = hs->log_offset;
+
+    while (_gf_true) {
+        size = sys_pread(fd, &needle, sizeof(needle)+NAME_MAX+1, offset);
+        if (size == 0) {
+            break;
+        }
+
+        /* broken file */
+        if (size < sizeof(needle)) {          
+            ret = -1;
+            goto err;
+        }
+
+        if (!gf_uuid_is_null(needle.gfid)) {         
+            ret = dict_get_bin(hs->mem, uuid_utoa(needle.gfid), &mem_idx);
+            if (needle.flags & DELETED) {            
+                if (!ret) {                    
+                    dict_del(hs->mem, uuid_utoa(needle.gfid));
+                    GF_REF_PUT(mem_idx);
+                }
+            } else {
+                if (!ret) {
+                    GF_REF_PUT(mem_idx);                
+                }
+
+                mem_idx = hs_mem_idx_init_from_needle(&needle, offset);
+                if (mem_idx) {
+                    ret = dict_set_static_bin(hs->mem, uuid_utoa(needle.gfid), mem_idx, sizeof(*mem_idx)+mem_idx->name_len);
+                    if (ret) {
+                        GF_REF_PUT(mem_idx);
+                        ret = -1;
+                        goto err; /* log for set fail */
+                    }
+                } else {
+                    ret = -1;
+                    goto err; /* log for mem_idx_init fail */
+                }
+            }
+
+            idx = hs_idx_init_from_needle(&needle, offset);
+            size = sys_write(hs->idx_fd, idx, sizeof(*idx)+idx->name_len);
+            if (size != sizeof(*idx)+idx->name_len) {
+                ret = -1;
+                goto err; /* log for write fail */
+            }
+        }
+
+        offset += (sizeof(struct hs_needle) + needle.name_len + needle.size);        
     }
 
     hs->log_fd = fd;
-    if (!append_idx) {
-        sys_close(hs->idx_fd);
-        hs->idx_fd = -1;
-    }
-    GF_FREE(idx);
-    GF_FREE(needle);
     GF_FREE(log_rpath);    
     
     return 0;    
@@ -226,9 +340,7 @@ err:
 
     dict_foreach(hs->mem, hs_mem_idx_purge, NULL);
     sys_close(hs->idx_fd);
-    hs->idx_fd = -1;   
-    GF_FREE(idx);
-    GF_FREE(needle);
+    hs->idx_fd = -1;
     GF_FREE(log_rpath);
     return ret;
 }
@@ -263,19 +375,20 @@ hs_quick_build(struct hs *hs) {
         goto err;
     }
 
-    fd = sys_open(rpath, O_RDWR | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    fd = sys_open(rpath, OFLAG, MODE);
     if (fd == -1) {
         ret = -1;
         goto err;
     }
 
     size = sys_pread(fd, &super, sizeof(super), offset);
-    if (size != sizeof(super) || super.version != VERSION || !gf_uuid_compare(super.gfid, hs->gfid)) {
+    if (size != sizeof(super) || super.version != VERSION || gf_uuid_compare(super.gfid, hs->gfid)) {
         sys_close(fd);
+        ret = -1;
         goto err;
     }
 
-    offset = size;
+    offset += size;
     hs->log_offset = size;
 
     while (_gf_true) {
@@ -298,7 +411,7 @@ hs_quick_build(struct hs *hs) {
                 }
             } else {
                 if (!ret) {
-                    GF_REF_PUT(mem_idx);                
+                    GF_REF_PUT(mem_idx);               
                 }
 
                 mem_idx = hs_mem_idx_init_from_idx(idx);
@@ -312,13 +425,12 @@ hs_quick_build(struct hs *hs) {
                 } else {
                     ret = -1;
                     goto err; /* log for mem_idx_init fail*/
-                }
-                
-                hs->log_offset = idx->offset + sizeof(struct hs_needle) + idx->name_len + idx->size;
+                }                                
             }
         }
         
         offset += (sizeof(*idx) + idx->name_len);
+        hs->log_offset = idx->offset + sizeof(struct hs_needle) + idx->name_len + idx->size;        
     }
 
     hs->idx_fd = fd;
@@ -326,32 +438,9 @@ hs_quick_build(struct hs *hs) {
     GF_FREE(idx);
 
     return 0;
-/*
-new:
-    fd = sys_open(rpath, O_RDWR | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    if (fd == -1) {
-        ret = -1;
-        goto err;
-    }
 
-    super.version = VERSION;
-    gf_uuid_copy(super.gfid, hs->gfid);
-
-    size = sys_write(fd, &super, sizeof(super));
-    if (size != sizeof(super)) {
-        sys_close(fd);
-        sys_unlink(rpath);
-        ret = -1;
-        goto err;
-    }
-
-    hs->idx_fd = fd;
-    hs->idx_offset = size;
-    
-    return 0;
-*/
 err:
-    if (fd > 0) {
+    if (fd >= 0) {
         sys_close(fd);
     }
 
@@ -398,8 +487,15 @@ hs_build(struct hs *hs) {
         ret = hs_orphan_build(hs);
     }
 
+    if (ret != 0) {
+        ret = -1;
+        goto err;
+    }
+
+    return 0;
+
 new:
-    log_fd = sys_open(log_rpath, O_RDWR | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    log_fd = sys_open(log_rpath, COFLAG, MODE);
     if (log_fd == -1) {
         ret = -1;
         goto err;
@@ -410,7 +506,7 @@ new:
         sys_unlink(idx_rpath);
     }
     
-    idx_fd = sys_open(idx_rpath, O_RDWR | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    idx_fd = sys_open(idx_rpath, COFLAG, MODE);
     if (idx_fd == -1) {
         ret = -1;
         goto err;
@@ -419,13 +515,13 @@ new:
     super.version = VERSION;
     gf_uuid_copy(super.gfid, hs->gfid);
     
-    size = sys_write(log_fd, &super, sizeof(super));
+    size = sys_pwrite(log_fd, &super, sizeof(super), 0);
     if (size != sizeof(super)) {
         ret = -1;
         goto err;
     }
 
-    size = sys_write(idx_fd, &super, sizeof(super));
+    size = sys_pwrite(idx_fd, &super, sizeof(super), 0);
     if (size != sizeof(super)) {
         ret = -1;
         goto err;
@@ -433,6 +529,8 @@ new:
 
     hs->log_fd = log_fd;
     hs->idx_fd = idx_fd;
+    GF_FREE(log_rpath);
+    GF_FREE(idx_rpath);
 
     return 0;
 
@@ -468,6 +566,7 @@ hs_free(void *to_free) {
         return;
     }
 
+    dict_foreach(hs->mem, hs_mem_idx_purge, NULL);
     dict_unref(hs->mem);
     GF_FREE(hs->real_path);
     GF_FREE(hs);

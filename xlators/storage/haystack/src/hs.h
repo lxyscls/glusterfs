@@ -30,7 +30,7 @@ struct hs {
 
     int log_fd;
     int idx_fd;
-    uint64_t log_offset;
+    uint64_t log_offset; // only used when startup.
 };
 
 struct hs_super {
@@ -63,7 +63,7 @@ struct hs_mem_idx {
     struct iatt buf;
     uint8_t name_len;
     uint32_t size;
-    uint64_t offset;
+    uint64_t offset; // 0: DELETED, 1: CREATED
     char name[0];
 };
 
