@@ -10,7 +10,7 @@
 #include <glusterfs/iatt.h>
 #include <glusterfs/locking.h>
 
-#define VERSION 0x00000001
+#define HSVERSION 0x00000001
 #define DELETED (1<<0)
 
 struct hs_ctx {

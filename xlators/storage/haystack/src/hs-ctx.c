@@ -23,7 +23,7 @@
 
 static void 
 hs_mem_idx_free(void *to_free) {
-    struct hs_mem_idx *mem_idx = (struct hs *)to_free;
+    struct hs_mem_idx *mem_idx = (struct hs_mem_idx *)to_free;
 
     if (!mem_idx) {
         return;
@@ -46,7 +46,7 @@ hs_mem_idx_purge(dict_t *d, char *k, data_t *v, void *_unused) {
 
 struct hs_idx *
 hs_idx_init_from_needle(struct hs_needle *needle, uint64_t offset) {
-    static struct hs_idx idx = {0};
+    static struct hs_idx idx;
 
     if (!needle) {
         goto out;
@@ -130,7 +130,7 @@ hs_slow_build(struct hs *hs) {
     struct hs_super super = {0};
     ssize_t size = -1;
     ssize_t offset = 0;
-    struct hs_needle needle = {0};
+    struct hs_needle needle = {{0}};
     struct hs_mem_idx *mem_idx = NULL;
     struct hs_idx *idx = NULL;
 
@@ -165,7 +165,7 @@ hs_slow_build(struct hs *hs) {
         goto err;
     }
 
-    super.version = VERSION;
+    super.version = HSVERSION;
     gf_uuid_copy(super.gfid, hs->gfid);
 
     size = sys_pwrite(idx_fd, &super, sizeof(super), 0);
@@ -175,7 +175,7 @@ hs_slow_build(struct hs *hs) {
     }    
 
     size = sys_pread(log_fd, &super, sizeof(super), offset);
-    if (size != sizeof(super) || super.version != VERSION || gf_uuid_compare(super.gfid, hs->gfid)) {
+    if (size != sizeof(super) || super.version != HSVERSION || gf_uuid_compare(super.gfid, hs->gfid)) {
         ret = -1;
         goto err;
     }
@@ -195,7 +195,7 @@ hs_slow_build(struct hs *hs) {
         }
 
         if (!gf_uuid_is_null(needle.gfid)) {         
-            ret = dict_get_bin(hs->mem, uuid_utoa(needle.gfid), &mem_idx);
+            ret = dict_get_bin(hs->mem, uuid_utoa(needle.gfid), (void **)&mem_idx);
             if (needle.flags & DELETED) {            
                 if (!ret) {                    
                     dict_del(hs->mem, uuid_utoa(needle.gfid));
@@ -259,7 +259,7 @@ hs_orphan_build(struct hs *hs) {
     int fd = -1;
     ssize_t size = -1;
     char *log_rpath = NULL;
-    struct hs_needle needle = {0};
+    struct hs_needle needle = {{0}};
     struct hs_mem_idx *mem_idx = NULL;
     struct hs_idx *idx = NULL;
     ssize_t offset = 0;
@@ -292,7 +292,7 @@ hs_orphan_build(struct hs *hs) {
         }
 
         if (!gf_uuid_is_null(needle.gfid)) {         
-            ret = dict_get_bin(hs->mem, uuid_utoa(needle.gfid), &mem_idx);
+            ret = dict_get_bin(hs->mem, uuid_utoa(needle.gfid), (void **)&mem_idx);
             if (needle.flags & DELETED) {            
                 if (!ret) {                    
                     dict_del(hs->mem, uuid_utoa(needle.gfid));
@@ -382,7 +382,7 @@ hs_quick_build(struct hs *hs) {
     }
 
     size = sys_pread(fd, &super, sizeof(super), offset);
-    if (size != sizeof(super) || super.version != VERSION || gf_uuid_compare(super.gfid, hs->gfid)) {
+    if (size != sizeof(super) || super.version != HSVERSION || gf_uuid_compare(super.gfid, hs->gfid)) {
         sys_close(fd);
         ret = -1;
         goto err;
@@ -403,7 +403,7 @@ hs_quick_build(struct hs *hs) {
         }
 
         if (!gf_uuid_is_null(idx->gfid)) {            
-            ret = dict_get_bin(hs->mem, uuid_utoa(idx->gfid), &mem_idx);
+            ret = dict_get_bin(hs->mem, uuid_utoa(idx->gfid), (void **)&mem_idx);
             if (idx->offset == 0) {            
                 if (!ret) {                    
                     dict_del(hs->mem, uuid_utoa(idx->gfid));
@@ -458,7 +458,7 @@ hs_build(struct hs *hs) {
     char *idx_rpath = NULL;
     int log_fd = -1;
     int idx_fd = -1;
-    sszie_t size = -1;
+    ssize_t size = -1;
     struct hs_super super = {0};
 
     log_rpath = GF_CALLOC(1, strlen(hs->real_path)+1+strlen(".log")+1, gf_common_mt_char);
@@ -512,7 +512,7 @@ new:
         goto err;
     }
 
-    super.version = VERSION;
+    super.version = HSVERSION;
     gf_uuid_copy(super.gfid, hs->gfid);
     
     size = sys_pwrite(log_fd, &super, sizeof(super), 0);
