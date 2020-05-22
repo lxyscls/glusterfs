@@ -11,7 +11,7 @@ ORPHAN = True
 SLOW = True
 
 def gen_needle(gfid, iatt):
-    ret = struct.pack(NEEDLE_FMT_1, gfid.hex)
+    ret = struct.pack(NEEDLE_FMT_1, gfid.bytes)
     ret = ret + iatt
     ret = ret + struct.pack(NEEDLE_FMT_2, 0, len(gfid.hex)+1, 1024)
     ret = ret + struct.pack('32sc', gfid.hex, '\0')

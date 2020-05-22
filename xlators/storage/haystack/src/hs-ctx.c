@@ -484,7 +484,7 @@ hs_quick_build(struct hs *hs) {
     GF_FREE(rpath);
     GF_FREE(idx);
 
-    return 0;
+    return offset > sizeof(super) ? 0 : -1;
 
 err:
     if (fd >= 0) {
