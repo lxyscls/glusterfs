@@ -5,10 +5,14 @@ import os
 import struct
 import time
 import random
+import getopt
 from hs_common import *
 
-ORPHAN = True
-SLOW = True
+ORPHAN = False
+SLOW = False
+LEVELS = 3
+DIRS = 3
+FILES = 100
 
 def gen_needle(gfid, iatt):
     ret = struct.pack(NEEDLE_FMT_1, gfid.bytes)
@@ -83,11 +87,27 @@ def gen_dir(parpath, path, gfid, level):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) <= 1:
+    opts, args = getopt.getopt(sys.argv[1:], "L:D:F:os")
+
+    if not args:
         print "You should supply a root path!"
         sys.exit(0)
 
-    root_path = sys.argv[1]
+    for o, a in opts:
+        if o == '-L':
+            LEVELS = int(a)
+        elif o == '-D':
+            DIRS = int(a)
+        elif o == '-F':
+            FILES = int(a)
+        elif o == '-o':
+            ORPHAN = True
+        elif o == '-s':
+            SLOW = True
+        else:
+            assert False, "unhandled option"
+
+    root_path = args[0]
     try:
         os.stat(root_path)
         print "You should clean the root path!"

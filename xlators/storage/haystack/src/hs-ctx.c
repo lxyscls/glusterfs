@@ -20,6 +20,7 @@
 #define COFLAG (O_RDWR | O_CREAT | O_APPEND)
 #define OFLAG (O_RDWR | O_APPEND)
 #define MODE (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
+#define BUFF_SIZE (128*1024)
 
 int
 hs_mem_idx_print(dict_t *d, char *k, data_t *v, void *_unused) {
@@ -147,6 +148,10 @@ hs_slow_build(struct hs *hs) {
     struct hs_needle *needle = NULL;
     struct hs_mem_idx *mem_idx = NULL;
     struct hs_idx *idx = NULL;
+    char *buff = NULL;
+    uint64_t left = 0;
+    uint64_t shift = 0;
+    ssize_t wsize = -1;
 
     log_rpath = GF_CALLOC(1, strlen(hs->real_path)+1+strlen(".log")+1, gf_common_mt_char);
     if (!log_rpath) {
@@ -162,8 +167,8 @@ hs_slow_build(struct hs *hs) {
     }
     sprintf(idx_rpath, "%s/.idx", hs->real_path);
 
-    needle = GF_CALLOC(1, sizeof(*needle)+NAME_MAX+1, gf_common_mt_char);
-    if (!needle) {
+    buff = GF_CALLOC(1, BUFF_SIZE, gf_common_mt_char);
+    if (!buff) {
         ret = -1;
         goto err;
     }
@@ -200,70 +205,100 @@ hs_slow_build(struct hs *hs) {
         goto err;
     }
 
-    offset += size;
+    offset = sizeof(super);
+    hs->log_offset = sizeof(super);
 
-    int i = 0;
+    shift = 0;
     while (_gf_true) {
-        size = sys_pread(log_fd, needle, sizeof(*needle)+NAME_MAX+1, offset);
+        size = sys_pread(log_fd, buff+shift, BUFF_SIZE-shift, offset);
+        if (size < 0) {
+            ret = -1; /* log */
+            goto err;
+        }
+
         if (size == 0) {
+            /* incomplete needle */
+            if (shift > 0) {
+                ret = -1; /* log */
+                goto err;
+            }
             break;
         }
 
-        /* broken file */
-        if (size < sizeof(*needle)) {          
+        /* incomplete needle */
+        if (shift+size < sizeof(*needle)) {          
             ret = -1;
             goto err;
         }
 
-        if (!gf_uuid_is_null(needle->gfid)) {         
-            ret = dict_get_bin(hs->mem, uuid_utoa(needle->gfid), (void **)&mem_idx);
-            if (needle->flags & DELETED) {            
-                if (!ret) {                    
-                    dict_del(hs->mem, uuid_utoa(needle->gfid));
-                    GF_REF_PUT(mem_idx);
-                }
-            } else {
-                if (!ret) {
-                    GF_REF_PUT(mem_idx);                
-                }
+        left = 0;
+        while (left+sizeof(*needle) <= shift+size) {
+            needle = (struct hs_needle *)(buff+left);
 
-                mem_idx = hs_mem_idx_init_from_needle(needle, offset);
-                if (mem_idx) {
-                    ret = dict_set_static_bin(hs->mem, uuid_utoa(needle->gfid), mem_idx, sizeof(*mem_idx)+mem_idx->name_len);
-                    if (ret) {
+            /* incomplete name or payload */
+            if (left+sizeof(*needle)+needle->name_len+needle->size > shift+size) {
+                memcpy(buff, buff+left, shift+size-left);
+                shift = shift+size-left;
+                left = 0;
+                break;                
+            }
+
+            if (!gf_uuid_is_null(needle->gfid)) {         
+                ret = dict_get_bin(hs->mem, uuid_utoa(needle->gfid), (void **)&mem_idx);
+                if (needle->flags & DELETED) {            
+                    if (!ret) {                    
+                        dict_del(hs->mem, uuid_utoa(needle->gfid));
                         GF_REF_PUT(mem_idx);
-                        ret = -1;
-                        goto err; /* log for set fail */
                     }
                 } else {
-                    ret = -1;
-                    goto err; /* log for mem_idx_init fail */
+                    if (!ret) {
+                        GF_REF_PUT(mem_idx);                
+                    }
+
+                    mem_idx = hs_mem_idx_init_from_needle(needle, hs->log_offset);
+                    if (mem_idx) {
+                        ret = dict_set_static_bin(hs->mem, uuid_utoa(needle->gfid), mem_idx, sizeof(*mem_idx)+mem_idx->name_len);
+                        if (ret) {
+                            GF_REF_PUT(mem_idx);
+                            ret = -1;
+                            goto err; /* log for set fail */
+                        }
+                    } else {
+                        ret = -1;
+                        goto err; /* log for mem_idx_init fail */
+                    }
+                }
+
+                /* idx seq != log seq is fatal! */
+                idx = hs_idx_init_from_needle(needle, hs->log_offset);
+                if (idx) {
+                    wsize = sys_write(hs->idx_fd, idx, sizeof(*idx)+idx->name_len);
+                    if (wsize != sizeof(*idx)+idx->name_len) {
+                        GF_FREE(idx);
+                        ret = -1;
+                        goto err; /* log for write fail */
+                    }
+                    GF_FREE(idx);
                 }
             }
 
-            /* idx seq != log seq is fatal! */
-            idx = hs_idx_init_from_needle(needle, offset);
-            if (idx) {
-                size = sys_write(hs->idx_fd, idx, sizeof(*idx)+idx->name_len);
-                if (size != sizeof(*idx)+idx->name_len) {
-                    GF_FREE(idx);
-                    ret = -1;
-                    goto err; /* log for write fail */
-                }
-                GF_FREE(idx);
-            }
+            left += (sizeof(*needle) + needle->name_len + needle->size);
+            hs->log_offset += (sizeof(struct hs_needle) + needle->name_len + needle->size);
         }
 
-        offset += (sizeof(struct hs_needle) + needle->name_len + needle->size);
-        
-        ++i;
+        if (left > 0 && left <= shift+size && left+sizeof(*needle) > shift+size) {
+            memcpy(buff, buff+left, shift+size-left);
+            shift = shift+size-left;         
+        }        
+
+        offset += size;
     }
 
     hs->log_fd = log_fd;
     hs->idx_fd = idx_fd;
     GF_FREE(log_rpath);
     GF_FREE(idx_rpath);
-    GF_FREE(needle);
+    GF_FREE(buff);
     
     return 0;
 
@@ -275,9 +310,10 @@ err:
         sys_close(idx_fd);
     }
     dict_foreach(hs->mem, hs_mem_idx_purge, NULL);
+    dict_reset(hs->mem);
     GF_FREE(log_rpath);
     GF_FREE(idx_rpath);
-    GF_FREE(needle);
+    GF_FREE(buff);
 
     return ret;
 }
@@ -292,6 +328,10 @@ hs_orphan_build(struct hs *hs) {
     struct hs_mem_idx *mem_idx = NULL;
     struct hs_idx *idx = NULL;
     uint64_t offset = 0;
+    char *buff = NULL;
+    uint64_t left = 0;
+    uint64_t shift = 0;
+    ssize_t wsize = -1;
 
     log_rpath = GF_CALLOC(1, strlen(hs->real_path)+1+strlen(".log")+1, gf_common_mt_char);
     if (!log_rpath) {
@@ -300,8 +340,8 @@ hs_orphan_build(struct hs *hs) {
     }
     sprintf(log_rpath, "%s/.log", hs->real_path);
 
-    needle = GF_CALLOC(1, sizeof(*needle)+NAME_MAX+1, gf_common_mt_char);
-    if (!needle) {
+    buff = GF_CALLOC(1, BUFF_SIZE, gf_common_mt_char);
+    if (!buff) {
         ret = -1;
         goto err;
     }
@@ -314,65 +354,98 @@ hs_orphan_build(struct hs *hs) {
 
     offset = hs->log_offset;
 
-    int i = 0;
+    shift = 0;
     while (_gf_true) {
-        size = sys_pread(fd, needle, sizeof(*needle)+NAME_MAX+1, offset);
+        size = sys_pread(fd, buff+shift, BUFF_SIZE-shift, offset);
+        if (size < 0) {
+            ret = -1; /* log */
+            goto err;
+        }
+
         if (size == 0) {
+            /* incomplete needle */
+            if (shift > 0) {
+                ret = -1; /* log */
+                goto err;
+            }
             break;
         }
 
-        /* broken file */
-        if (size < sizeof(*needle)) {          
+        /* incomplete needle */
+        if (shift+size < sizeof(*needle)) {          
             ret = -1;
             goto err;
         }
 
-        if (!gf_uuid_is_null(needle->gfid)) {         
-            ret = dict_get_bin(hs->mem, uuid_utoa(needle->gfid), (void **)&mem_idx);
-            if (needle->flags & DELETED) {            
-                if (!ret) {                    
-                    dict_del(hs->mem, uuid_utoa(needle->gfid));
-                    GF_REF_PUT(mem_idx);
-                }
-            } else {
-                if (!ret) {
-                    GF_REF_PUT(mem_idx);                
-                }
+        left = 0;
+        while (left+sizeof(*needle) <= shift+size) {
+            needle = (struct hs_needle *)(buff+left);
 
-                mem_idx = hs_mem_idx_init_from_needle(needle, offset);
-                if (mem_idx) {
-                    ret = dict_set_static_bin(hs->mem, uuid_utoa(needle->gfid), mem_idx, sizeof(*mem_idx)+mem_idx->name_len);
-                    if (ret) {
+            /* incomplete name or payload */
+            if (left+sizeof(*needle)+needle->name_len+needle->size > shift+size) {
+                memcpy(buff, buff+left, shift+size-left);
+                shift = shift+size-left;
+                left = 0;
+                break;           
+            }
+
+            if (!gf_uuid_is_null(needle->gfid)) {         
+                ret = dict_get_bin(hs->mem, uuid_utoa(needle->gfid), (void **)&mem_idx);
+                if (needle->flags & DELETED) {            
+                    if (!ret) {                    
+                        dict_del(hs->mem, uuid_utoa(needle->gfid));
                         GF_REF_PUT(mem_idx);
-                        ret = -1;
-                        goto err; /* log for set fail */
                     }
                 } else {
+                    if (!ret) {
+                        GF_REF_PUT(mem_idx);                
+                    }
+
+                    mem_idx = hs_mem_idx_init_from_needle(needle, hs->log_offset);
+                    if (mem_idx) {
+                        ret = dict_set_static_bin(hs->mem, uuid_utoa(needle->gfid), mem_idx, sizeof(*mem_idx)+mem_idx->name_len);
+                        if (ret) {
+                            GF_REF_PUT(mem_idx);
+                            ret = -1;
+                            goto err; /* log for set fail */
+                        }
+                    } else {
+                        ret = -1;
+                        goto err; /* log for mem_idx_init fail */
+                    }
+                }
+
+                idx = hs_idx_init_from_needle(needle, hs->log_offset);
+                if (idx) {
+                    wsize = sys_write(hs->idx_fd, idx, sizeof(*idx)+idx->name_len);
+                    if (wsize != sizeof(*idx)+idx->name_len) {
+                        GF_FREE(idx);
+                        ret = -1;
+                        goto err; /* log for write fail */
+                    }
+                    GF_FREE(idx);
+                } else {
                     ret = -1;
-                    goto err; /* log for mem_idx_init fail */
+                    goto err; /* log for init fail */
                 }
             }
 
-            idx = hs_idx_init_from_needle(needle, offset);
-            if (idx) {
-                size = sys_write(hs->idx_fd, idx, sizeof(*idx)+idx->name_len);
-                if (size != sizeof(*idx)+idx->name_len) {
-                    GF_FREE(idx);
-                    ret = -1;
-                    goto err; /* log for write fail */
-                }
-                GF_FREE(idx);
-            }
+
+            left += (sizeof(*needle) + needle->name_len + needle->size); 
+            hs->log_offset += (sizeof(*needle) + needle->name_len + needle->size);  
         }
 
-        offset += (sizeof(struct hs_needle) + needle->name_len + needle->size);       
+        if (left > 0 && left <= shift+size && left+sizeof(*needle) > shift+size) {
+            memcpy(buff, buff+left, shift+size-left);
+            shift = shift+size-left;         
+        }
 
-        ++i; 
+        offset += size;
     }
 
     hs->log_fd = fd;
     GF_FREE(log_rpath);    
-    GF_FREE(needle);
+    GF_FREE(buff);
     
     return 0;    
 
@@ -382,10 +455,11 @@ err:
     }
 
     dict_foreach(hs->mem, hs_mem_idx_purge, NULL);
+    dict_reset(hs->mem);
     sys_close(hs->idx_fd);
     hs->idx_fd = -1;
     GF_FREE(log_rpath);
-    GF_FREE(needle);
+    GF_FREE(buff);
     return ret;
 }
 
@@ -399,7 +473,10 @@ hs_quick_build(struct hs *hs) {
     struct hs_super super = {0};
     struct hs_idx *idx = NULL;
     struct hs_mem_idx *mem_idx =NULL;
-    ssize_t offset = 0;
+    uint64_t offset = 0;
+    char *buff = NULL;
+    uint64_t left = 0;
+    uint64_t shift = 0;
 
     rpath = GF_CALLOC(1, strlen(hs->real_path)+1+strlen(".idx")+1, gf_common_mt_char);
     if (!rpath) {
@@ -408,11 +485,11 @@ hs_quick_build(struct hs *hs) {
     }
     sprintf(rpath, "%s/.idx", hs->real_path);
 
-    idx = GF_CALLOC(1, sizeof(*idx)+NAME_MAX+1, gf_hs_mt_hs_idx);
-    if (!idx) {
+    buff = GF_CALLOC(1, BUFF_SIZE, gf_common_mt_char);
+    if (!buff) {
         ret = -1;
         goto err;
-    }    
+    }
 
     ret = sys_stat(rpath, &stbuf);
     if (ret != 0 && errno == ENOENT) {
@@ -432,57 +509,85 @@ hs_quick_build(struct hs *hs) {
         goto err;
     }
 
-    offset += size;
-    hs->log_offset = size;
+    offset = sizeof(super);
+    hs->log_offset = sizeof(super);
 
-    int i = 0;
+    shift = 0;
     while (_gf_true) {
-        size = sys_pread(fd, idx, sizeof(*idx)+NAME_MAX+1, offset);
+        size = sys_pread(fd, buff+shift, BUFF_SIZE-shift, offset);
+        if (size < 0) {
+            ret = -1; /* log */
+            goto err;
+        }
+
         if (size == 0) {
+            /* incomplete idx */
+            if (shift > 0) {
+                sys_ftruncate(fd, offset);
+            }
             break;
         }
 
-        if (size < sizeof(*idx)) {
+        /* incomplete idx */
+        if (shift+size < sizeof(*idx)) {
             sys_ftruncate(fd, offset);
             break;
         }
 
-        if (!gf_uuid_is_null(idx->gfid)) {            
-            ret = dict_get_bin(hs->mem, uuid_utoa(idx->gfid), (void **)&mem_idx);
-            if (idx->offset == 0) {            
-                if (!ret) {                    
-                    dict_del(hs->mem, uuid_utoa(idx->gfid));
-                    GF_REF_PUT(mem_idx);
-                }
-            } else {
-                if (!ret) {
-                    GF_REF_PUT(mem_idx);               
-                }
+        left = 0;
+        while (left+sizeof(*idx) <= shift+size) {
+            idx = (struct hs_idx *)(buff+left);
 
-                mem_idx = hs_mem_idx_init_from_idx(idx);
-                if (mem_idx) {
-                    ret = dict_set_static_bin(hs->mem, uuid_utoa(idx->gfid), mem_idx, sizeof(*mem_idx)+mem_idx->name_len);
-                    if (ret) {
+            /* incomplete name */
+            if (left+sizeof(*idx)+idx->name_len > shift+size) {
+                memcpy(buff, buff+left, shift+size-left);
+                shift = shift+size-left;
+                left = 0;
+                break;
+            }
+
+            if (!gf_uuid_is_null(idx->gfid)) {            
+                ret = dict_get_bin(hs->mem, uuid_utoa(idx->gfid), (void **)&mem_idx);
+                if (idx->offset == 0) {            
+                    if (!ret) {                    
+                        dict_del(hs->mem, uuid_utoa(idx->gfid));
                         GF_REF_PUT(mem_idx);
-                        ret = -1;
-                        goto err; /* log for set fail */
                     }
                 } else {
-                    ret = -1;
-                    goto err; /* log for mem_idx_init fail*/
-                }                                
-            }
-        }
-        
-        offset += (sizeof(*idx) + idx->name_len);
-        hs->log_offset = idx->offset + sizeof(struct hs_needle) + idx->name_len + idx->size;        
+                    if (!ret) {
+                        GF_REF_PUT(mem_idx);               
+                    }
 
-        ++i;
+                    mem_idx = hs_mem_idx_init_from_idx(idx);
+                    if (mem_idx) {
+                        ret = dict_set_static_bin(hs->mem, uuid_utoa(idx->gfid), mem_idx, sizeof(*mem_idx)+mem_idx->name_len);
+                        if (ret) {
+                            GF_REF_PUT(mem_idx);
+                            ret = -1;
+                            goto err; /* log for set fail */
+                        }
+                    } else {
+                        ret = -1;
+                        goto err; /* log for mem_idx_init fail*/
+                    }                                
+                }
+            }
+
+            left += (sizeof(*idx) + idx->name_len);
+            hs->log_offset = idx->offset + sizeof(struct hs_needle) + idx->name_len + idx->size;
+        }
+
+        if (left > 0 && left <= shift+size && left+sizeof(*idx) > shift+size) {
+            memcpy(buff, buff+left, shift+size-left);
+            shift = shift+size-left;
+        }
+
+        offset += size;
     }
 
     hs->idx_fd = fd;
     GF_FREE(rpath);
-    GF_FREE(idx);
+    GF_FREE(buff);
 
     return offset > sizeof(super) ? 0 : -1;
 
@@ -492,8 +597,9 @@ err:
     }
 
     dict_foreach(hs->mem, hs_mem_idx_purge, NULL);
+    dict_reset(hs->mem);
     GF_FREE(rpath);
-    GF_FREE(idx);
+    GF_FREE(buff);
     return ret;
 }
 
