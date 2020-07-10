@@ -237,7 +237,7 @@ hs_slow_build(struct hs *hs) {
         if (size == 0) {
             if (shift > 0) {
                 gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_NEEDLE,
-                    "Broken needle in log file: %s.", log_rpath);                 
+                    "Broken needle: %s.", log_rpath);                 
                 ret = -1;
                 goto err;
             }
@@ -247,7 +247,7 @@ hs_slow_build(struct hs *hs) {
         /* incomplete needle */
         if (shift+size < sizeof(*needle)) {
             gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_NEEDLE,
-                "Broken needle in log file: %s.", log_rpath);             
+                "Broken needle: %s.", log_rpath);             
             ret = -1;
             goto err;
         }
@@ -407,7 +407,7 @@ hs_orphan_build(struct hs *hs) {
         if (size == 0) {
             if (shift > 0) {
                 gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_NEEDLE,
-                    "Broken needle in log file: %s.", rpath);                 
+                    "Broken needle: %s.", rpath);                 
                 ret = -1;
                 goto err;
             }
@@ -417,7 +417,7 @@ hs_orphan_build(struct hs *hs) {
         /* incomplete needle */
         if (shift+size < sizeof(*needle)) {          
             gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_NEEDLE,
-                "Broken needle in log file: %s.", rpath);         
+                "Broken needle: %s.", rpath);         
             ret = -1;
             goto err;
         }
@@ -592,16 +592,16 @@ hs_quick_build(struct hs *hs) {
         if (size == 0) { 
             if (shift > 0) {
                 gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_IDX,
-                    "Broken idx in idx file: %s.", rpath); 
-                sys_ftruncate(fd, offset);
+                    "Broken idx: %s.", rpath); 
+                sys_ftruncate(fd, offset-shift);
             }
             break;
         }
 
         if (shift+size < sizeof(*idx)) {
             gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_IDX,
-                "Broken idx in idx file: %s.", rpath); 
-            sys_ftruncate(fd, offset);
+                "Broken idx: %s.", rpath); 
+            sys_ftruncate(fd, offset-shift);
             break;
         }
 
