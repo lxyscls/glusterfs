@@ -9,6 +9,7 @@
 #include <glusterfs/compat.h>
 #include <glusterfs/iatt.h>
 #include <glusterfs/locking.h>
+#include <glusterfs/list.h>
 
 #define HSVERSION 0x00000001
 #define DELETED (1<<0)
@@ -21,12 +22,16 @@ struct hs_ctx {
 
 struct hs {
     GF_REF_DECL;
+    gf_lock_t lock;
 
     uuid_t gfid;
     char *real_path;
-    struct hs *parent;
 
-    dict_t *mem;
+    struct hs *parent;
+    struct list_head children;
+    struct list_head me;
+
+    dict_t *idx_dict;
 
     int log_fd;
     int idx_fd;
@@ -79,7 +84,7 @@ struct hs_private {
 
 struct hs_ctx *hs_ctx_init(const char *rpath);
 void hs_ctx_free(struct hs_ctx *ctx);
-int hs_print(dict_t *d, char *k, data_t *v, void *_unused);
+int hs_dump(dict_t *d, char *k, data_t *v, void *_unused);
 struct hs *hs_init(const char *rpath, struct hs *parent);
 
 #endif

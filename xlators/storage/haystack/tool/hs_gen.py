@@ -61,7 +61,7 @@ def fill_files(parpath, gfid):
 
         if not SLOW:
             if ORPHAN:
-                if i < FILES-10:
+                if i < FILES-(FILES/3):
                     idx_fd.write(idx)
             else:
                 idx_fd.write(idx)
