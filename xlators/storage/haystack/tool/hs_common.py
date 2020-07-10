@@ -33,11 +33,11 @@ IATT_FMT = "=5Q4IQ4q4I2Q16sii"
 
 '''
 struct hs_super {
-    int version;
+    uint8_t version;
     uuid_t gfid;
 } __attribute__ ((packed));
 '''
-SUPER_FMT = "=i16s"
+SUPER_FMT = "=B16s"
 
 '''
 struct hs_needle {
@@ -65,5 +65,5 @@ struct hs_idx {
 IDX_FMT_1 = "=16s"
 IDX_FMT_2 = "=BIQ"
 
+HSVERSION = 1
 ROOTGFID = uuid.UUID("00000000-0000-0000-0000-000000000001")
-HSVERSION = 0x00000001

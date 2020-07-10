@@ -11,7 +11,7 @@
 #include <glusterfs/locking.h>
 #include <glusterfs/list.h>
 
-#define HSVERSION 0x00000001
+#define HSVERSION 1
 #define DELETED (1<<0)
 
 struct hs_ctx {
@@ -39,7 +39,7 @@ struct hs {
 };
 
 struct hs_super {
-    int version;
+    uint8_t version;
     uuid_t gfid;
 } __attribute__ ((packed));
 
