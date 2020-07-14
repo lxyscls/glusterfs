@@ -44,13 +44,14 @@ struct hs_needle {
     uuid_t gfid;
     struct iatt buf;
     uint8_t flags;
+    uint32_t crc;
     uint8_t name_len;
     uint32_t size;
     char data[0]; /* name + data */
 } __attribute__ ((packed));
 '''
 NEEDLE_FMT_1 = "=16s"
-NEEDLE_FMT_2 = "=2BI"
+NEEDLE_FMT_2 = "=BIBI"
 
 '''
 struct hs_idx {

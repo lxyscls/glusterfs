@@ -47,6 +47,7 @@ struct hs_needle {
     uuid_t gfid;
     struct iatt buf;
     uint8_t flags;
+    uint32_t crc;
     uint8_t name_len;
     uint32_t size;
     char data[0]; /* name + data */

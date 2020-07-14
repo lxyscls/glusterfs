@@ -7,6 +7,7 @@ import time
 import random
 import getopt
 from hs_common import *
+import zlib
 
 ORPHAN = False
 SLOW = False
@@ -15,12 +16,17 @@ DIRS = 3
 FILES = 100
 
 def gen_needle(gfid, iatt):
+    buf = ''
+    for _ in range(1024):
+        buf = buf + struct.pack('B', random.randrange(0, 255))
+    
+    crc = zlib.crc32(buf) & 0xffffffff
+
     ret = struct.pack(NEEDLE_FMT_1, gfid.bytes)
     ret = ret + iatt
-    ret = ret + struct.pack(NEEDLE_FMT_2, 0, len(gfid.hex)+1, 1024)
+    ret = ret + struct.pack(NEEDLE_FMT_2, 0, crc, len(gfid.hex)+1, 1024)
     ret = ret + struct.pack('32sc', gfid.hex, '\0')
-    for _ in range(1024):
-        ret = ret + struct.pack('B', random.randrange(0, 255))
+    ret = ret + buf
 
     return ret
 
