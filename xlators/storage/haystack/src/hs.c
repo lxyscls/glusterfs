@@ -8,6 +8,7 @@
 #include <glusterfs/syscall.h>
 #include <glusterfs/compat-errno.h>
 #include <glusterfs/logging.h>
+#include <glusterfs/options.h>
 
 #include "hs.h"
 #include "hs-mem-types.h"
@@ -53,6 +54,8 @@ haystack_init(xlator_t *this) {
         goto out;
     }
 
+    this->private = private;
+
     ret = dict_get_str(this->options, "directory", &private->base_path);
     if (ret < 0) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_EXPORT_DIR_MISSING,
@@ -97,6 +100,8 @@ haystack_init(xlator_t *this) {
         }
     }
 
+    GF_OPTION_INIT("startup-crc-check", private->startup_crc_check, bool, out);
+
     umask(000);
     
     private->mount_lock = sys_opendir(private->base_path);
@@ -107,7 +112,7 @@ haystack_init(xlator_t *this) {
         goto out;
     }
 
-    private->ctx = hs_ctx_init(private->base_path);
+    private->ctx = hs_ctx_init(this, private->base_path);
     if (!private->ctx) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_CTX_FAILED,
             "%s: failed to setup haystack context", private->base_path);        
@@ -118,8 +123,6 @@ haystack_init(xlator_t *this) {
         dict_foreach(private->ctx->hs_dict, hs_dump, NULL);
 #endif
     }
-
-    this->private = private;
 
 out:
     if (ret) {
@@ -153,7 +156,8 @@ struct volume_options hs_options[] = {
     {.key = {"directory"},
      .type = GF_OPTION_TYPE_PATH,
      .default_value = "{{brick.path}}"},
-     {.key = {NULL}},
+    {.key = {"startup-crc-check"}, .type = GF_OPTION_TYPE_BOOL},
+    {.key = {NULL}},
 };
 
 xlator_api_t xlator_api = {

@@ -10,6 +10,8 @@
 #include <glusterfs/iatt.h>
 #include <glusterfs/locking.h>
 #include <glusterfs/list.h>
+#include <glusterfs/glusterfs.h>
+#include <glusterfs/xlator.h>
 
 #define HSVERSION 1
 #define DELETED (1<<0)
@@ -77,6 +79,7 @@ struct hs_mem_idx {
 struct hs_private {
     char *base_path;
     int32_t base_path_length;
+    gf_boolean_t startup_crc_check;
 
     /* lock for brick dir */
     DIR *mount_lock;
@@ -84,9 +87,9 @@ struct hs_private {
     struct hs_ctx *ctx;
 };
 
-struct hs_ctx *hs_ctx_init(const char *rpath);
+struct hs_ctx *hs_ctx_init(xlator_t *this, const char *rpath);
 void hs_ctx_free(struct hs_ctx *ctx);
 int hs_dump(dict_t *d, char *k, data_t *v, void *_unused);
-struct hs *hs_init(const char *rpath, struct hs *parent);
+struct hs *hs_init(xlator_t *this, const char *rpath, struct hs *parent);
 
 #endif

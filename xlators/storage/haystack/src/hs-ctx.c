@@ -6,6 +6,10 @@
 #include <fcntl.h>
 #include <errno.h>
 
+#ifdef HAVE_LIB_Z
+#include "zlib.h"
+#endif
+
 #include <glusterfs/mem-pool.h>
 #include <glusterfs/dict.h>
 #include <glusterfs/refcount.h>
@@ -134,7 +138,7 @@ out:
 }
 
 static int
-hs_slow_build(struct hs *hs) {
+hs_slow_build(xlator_t *this, struct hs *hs) {
     int ret = -1;
     char *log_rpath = NULL;
     char *idx_rpath = NULL;
@@ -151,9 +155,10 @@ hs_slow_build(struct hs *hs) {
     uint64_t left = 0;
     uint64_t shift = 0;
     ssize_t wsize = -1;
-    xlator_t *this = NULL;
+    struct hs_private *priv = NULL;
+    uint32_t crc = 0;
 
-    this = THIS;
+    priv = this->private;
 
     log_rpath = GF_CALLOC(1, strlen(hs->real_path)+1+strlen(".log")+1, gf_common_mt_char);
     if (!log_rpath) {
@@ -195,7 +200,7 @@ hs_slow_build(struct hs *hs) {
             sys_unlink(idx_rpath);
         } else {
             gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_BAD_IDX_FILE,
-                "Idx file is not a regular file: %s", idx_rpath);
+                "Idx file is not a regular file: %s.", idx_rpath);
             ret = -1;
             goto err;
         }
@@ -267,6 +272,19 @@ hs_slow_build(struct hs *hs) {
                 left = 0;
                 break;                
             }
+
+#ifdef HAVE_LIB_Z
+            crc = crc32(0L, Z_NULL, 0);
+            if (priv->startup_crc_check) {
+                crc = crc32(crc, (char *)needle+sizeof(*needle)+needle->name_len, needle->size);
+                if (crc != needle->crc) {
+                    gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_BROKEN_NEEDLE,
+                        "CRC check failed (%s/%s %s).", hs->real_path, needle->data, uuid_utoa(needle->gfid));
+                    ret = -1;
+                    goto err;
+                }
+            }
+#endif
     
             ret = dict_get_bin(hs->idx_dict, uuid_utoa(needle->gfid), (void **)&mem_idx);
             if (needle->flags & DELETED) {            
@@ -354,7 +372,7 @@ err:
 }
 
 static int
-hs_orphan_build(struct hs *hs) {
+hs_orphan_build(xlator_t *this, struct hs *hs) {
     int ret = -1;
     int fd = -1;
     ssize_t size = -1;
@@ -367,9 +385,10 @@ hs_orphan_build(struct hs *hs) {
     uint64_t left = 0;
     uint64_t shift = 0;
     ssize_t wsize = -1;
-    xlator_t *this = NULL;
+    uint32_t crc = 0;
+    struct hs_private *priv = NULL;
 
-    this = THIS;
+    priv = this->private;
 
     rpath = GF_CALLOC(1, strlen(hs->real_path)+1+strlen(".log")+1, gf_common_mt_char);
     if (!rpath) {
@@ -437,6 +456,19 @@ hs_orphan_build(struct hs *hs) {
                 left = 0;
                 break;           
             }
+
+#ifdef HAVE_LIB_Z
+            crc = crc32(0L, Z_NULL, 0);
+            if (priv->startup_crc_check) {
+                crc = crc32(crc, (char *)needle+sizeof(*needle)+needle->name_len, needle->size);
+                if (crc != needle->crc) {
+                    gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_BROKEN_NEEDLE,
+                        "CRC check failed (%s/%s %s).", hs->real_path, needle->data, uuid_utoa(needle->gfid));
+                    ret = -1;
+                    goto err;
+                }
+            }
+#endif            
        
             ret = dict_get_bin(hs->idx_dict, uuid_utoa(needle->gfid), (void **)&mem_idx);
             if (needle->flags & DELETED) {            
@@ -521,7 +553,7 @@ err:
 }
 
 static int
-hs_quick_build(struct hs *hs) {
+hs_quick_build(xlator_t *this, struct hs *hs) {
     int fd = -1;
     int ret = -1;
     char *rpath = NULL;
@@ -534,9 +566,6 @@ hs_quick_build(struct hs *hs) {
     char *buff = NULL;
     uint64_t left = 0;
     uint64_t shift = 0;
-    xlator_t *this = NULL;
-
-    this = THIS;
 
     rpath = GF_CALLOC(1, strlen(hs->real_path)+1+strlen(".idx")+1, gf_common_mt_char);
     if (!rpath) {
@@ -681,13 +710,10 @@ err:
 }
 
 static int
-hs_build(struct hs *hs) {
+hs_build(xlator_t *this, struct hs *hs) {
     int ret = -1;
     struct stat stbuf = {0};
     char *log_rpath = NULL;
-    xlator_t *this = NULL;
-
-    this = THIS;
 
     log_rpath = GF_CALLOC(1, strlen(hs->real_path)+1+strlen(".log")+1, gf_common_mt_char);
     if (!log_rpath) {
@@ -706,11 +732,11 @@ hs_build(struct hs *hs) {
         goto err;
     }
 
-    ret = hs_quick_build(hs);
+    ret = hs_quick_build(this, hs);
     if (ret < 0) {
-        ret = hs_slow_build(hs);
+        ret = hs_slow_build(this, hs);
     } else {
-        ret = hs_orphan_build(hs);
+        ret = hs_orphan_build(this, hs);
     }
 
     if (ret < 0) {
@@ -784,14 +810,11 @@ hs_purge(dict_t *d, char *k, data_t *v, void *_unused) {
 }
 
 struct hs *
-hs_init(const char *rpath, struct hs *parent) {
+hs_init(xlator_t *this, const char *rpath, struct hs *parent) {
     ssize_t size = -1;
     int ret = -1;
     uuid_t gfid = {0}; 
     struct hs *hs = NULL;
-    xlator_t *this = NULL;
-
-    this = THIS;
 
     /* invalid directory */
     size = sys_lgetxattr(rpath, "trusted.gfid", gfid, sizeof(gfid));
@@ -832,7 +855,7 @@ hs_init(const char *rpath, struct hs *parent) {
     hs->idx_fd = -1;
     hs->log_offset = 0;
 
-    ret = hs_build(hs);
+    ret = hs_build(this, hs);
     if (ret < 0) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_BUILD_FAILED,
             "Fail to build haystack: %s.", rpath);
@@ -874,7 +897,7 @@ err:
 }
 
 static struct hs *
-hs_setup(const char *rpath, struct hs *parent, struct hs_ctx *ctx) {
+hs_setup(xlator_t *this, const char *rpath, struct hs *parent, struct hs_ctx *ctx) {
     struct hs *hs = NULL;
     DIR *dir = NULL;
     struct dirent *entry = NULL;
@@ -882,11 +905,8 @@ hs_setup(const char *rpath, struct hs *parent, struct hs_ctx *ctx) {
     char *child_rpath = NULL;
     struct stat stbuf = {0};
     int ret = -1;
-    xlator_t *this = NULL;
 
-    this = THIS;
-
-    hs = hs_init(rpath, parent);
+    hs = hs_init(this, rpath, parent);
     if (!hs) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_INIT_FAILED, 
             "Fail to init haystack: %s.", rpath);         
@@ -918,7 +938,7 @@ hs_setup(const char *rpath, struct hs *parent, struct hs_ctx *ctx) {
             gf_msg(this->name, GF_LOG_WARNING, errno, H_MSG_LSTAT_FAILED,
                 "Fail to lstat: %s", child_rpath);
         } else if (S_ISDIR(stbuf.st_mode)) {
-            if (!hs_setup(child_rpath, hs, ctx)) {
+            if (!hs_setup(this, child_rpath, hs, ctx)) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_SCAN_FAILED,
                     "Fail to setup child haystack: %s.", child_rpath);
                 goto err;
@@ -963,11 +983,8 @@ hs_ctx_free(struct hs_ctx *ctx) {
 }
 
 struct hs_ctx *
-hs_ctx_init(const char *rpath) {
+hs_ctx_init(xlator_t *this, const char *rpath) {
     struct hs_ctx *ctx = NULL;
-    xlator_t *this = NULL;
-
-    this = THIS;
 
     ctx = (void *)GF_CALLOC(1, sizeof(struct hs_ctx), gf_hs_mt_hs_ctx);
     if (!ctx) {
@@ -983,7 +1000,7 @@ hs_ctx_init(const char *rpath) {
         goto err;
     }
 
-    ctx->root = hs_setup(rpath, NULL, ctx);
+    ctx->root = hs_setup(this, rpath, NULL, ctx);
     if (!ctx->root) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_SCAN_FAILED,
             "Fail to setup haystack: %s.", rpath);  
