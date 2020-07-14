@@ -45,7 +45,7 @@ def gen_iatt(gfid):
         t, t, t, t, 0, 0, 0, 0, 0, 0, gfid.bytes, 0, 0)
 
 def fill_super(fd, gfid):
-    fd.write(struct.pack(SUPER_FMT, HSVERSION, gfid.bytes))
+    fd.write(struct.pack(SUPER_FMT, HSVERSION, gfid.bytes, 0))
 
 def fill_files(parpath, gfid):
     log_fd = open(parpath + "/.log", "w+")

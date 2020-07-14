@@ -41,6 +41,7 @@ struct hs {
 struct hs_super {
     uint8_t version;
     uuid_t gfid;
+    uint16_t epoch;
 } __attribute__ ((packed));
 
 struct hs_needle {

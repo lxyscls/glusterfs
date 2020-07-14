@@ -191,7 +191,14 @@ hs_slow_build(struct hs *hs) {
     
     ret = sys_stat(idx_rpath, &stbuf);
     if (!ret) {
-        sys_unlink(idx_rpath);
+        if (S_ISREG(stbuf.st_mode)) {
+            sys_unlink(idx_rpath);
+        } else {
+            gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_BAD_IDX_FILE,
+                "Idx file is not a regular file: %s", idx_rpath);
+            ret = -1;
+            goto err;
+        }
     }
     
     idx_fd = sys_open(idx_rpath, COFLAG, MODE);
@@ -200,18 +207,7 @@ hs_slow_build(struct hs *hs) {
             "Fail to create idx file: %s.", idx_rpath);
         ret = -1;
         goto err;
-    }
-
-    super.version = HSVERSION;
-    gf_uuid_copy(super.gfid, hs->gfid);
-
-    size = sys_pwrite(idx_fd, &super, sizeof(super), 0);
-    if (size != sizeof(super)) {
-        gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_WRITE_FAILED,
-            "Fail to write super into idx file: %s.", idx_rpath);        
-        ret = -1;
-        goto err;
-    }    
+    } 
 
     size = sys_pread(log_fd, &super, sizeof(super), offset);
     if (size != sizeof(super) || super.version != HSVERSION || gf_uuid_compare(super.gfid, hs->gfid)) {
@@ -220,6 +216,14 @@ hs_slow_build(struct hs *hs) {
         ret = -1;
         goto err;
     }
+
+    size = sys_pwrite(idx_fd, &super, sizeof(super), 0);
+    if (size != sizeof(super)) {
+        gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_WRITE_FAILED,
+            "Fail to write super into idx file: %s.", idx_rpath);        
+        ret = -1;
+        goto err;
+    }    
 
     offset += sizeof(super);
     hs->log_offset = sizeof(super);

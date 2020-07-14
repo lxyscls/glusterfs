@@ -35,9 +35,10 @@ IATT_FMT = "=5Q4IQ4q4I2Q16sii"
 struct hs_super {
     uint8_t version;
     uuid_t gfid;
+    uint16_t epoch;
 } __attribute__ ((packed));
 '''
-SUPER_FMT = "=B16s"
+SUPER_FMT = "=B16sH"
 
 '''
 struct hs_needle {
