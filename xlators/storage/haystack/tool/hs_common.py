@@ -32,7 +32,7 @@ struct iatt {
 IATT_FMT = "=5Q4IQ4q4I2Q16sii"
 
 '''
-struct hs_super {
+struct super {
     uint8_t version;
     uuid_t gfid;
     uint16_t epoch;
@@ -41,7 +41,7 @@ struct hs_super {
 SUPER_FMT = "=B16sH"
 
 '''
-struct hs_needle {
+struct needle {
     uuid_t gfid;
     struct iatt buf;
     uint8_t flags;
@@ -55,7 +55,7 @@ NEEDLE_FMT_1 = "=16s"
 NEEDLE_FMT_2 = "=BIBI"
 
 '''
-struct hs_idx {
+struct idx {
     uuid_t gfid;
     struct iatt buf;
     uint8_t name_len;

@@ -16,10 +16,40 @@
 #define HSVERSION 1
 #define DELETED (1<<0)
 
-struct hs_ctx {
-    dict_t *hs_dict;
+struct super {
+    uint8_t version;
+    uuid_t gfid;
+    uint16_t epoch;
+} __attribute__ ((packed));
 
-    struct hs *root;
+struct needle {
+    uuid_t gfid;
+    struct iatt buf;
+    uint8_t flags;
+    uint32_t crc;
+    uint8_t name_len;
+    uint32_t size;
+    char data[0]; /* name + data */
+} __attribute__ ((packed));
+
+struct idx {
+    uuid_t gfid;
+    struct iatt buf;
+    uint8_t name_len;
+    uint32_t size;
+    uint64_t offset;
+    char name[0];
+} __attribute__ ((packed));
+
+struct mem_idx {
+    GF_REF_DECL;
+
+    gf_lock_t lock;
+    struct iatt buf;
+    uint8_t name_len;
+    uint32_t size;
+    uint64_t offset; // 0: DELETED, 1: CREATED
+    char name[0];
 };
 
 struct hs {
@@ -40,40 +70,10 @@ struct hs {
     uint64_t log_offset; // only used when startup.
 };
 
-struct hs_super {
-    uint8_t version;
-    uuid_t gfid;
-    uint16_t epoch;
-} __attribute__ ((packed));
+struct hs_ctx {
+    dict_t *hs_dict;
 
-struct hs_needle {
-    uuid_t gfid;
-    struct iatt buf;
-    uint8_t flags;
-    uint32_t crc;
-    uint8_t name_len;
-    uint32_t size;
-    char data[0]; /* name + data */
-} __attribute__ ((packed));
-
-struct hs_idx {
-    uuid_t gfid;
-    struct iatt buf;
-    uint8_t name_len;
-    uint32_t size;
-    uint64_t offset;
-    char name[0];
-} __attribute__ ((packed));
-
-struct hs_mem_idx {
-    GF_REF_DECL;
-
-    gf_lock_t lock;
-    struct iatt buf;
-    uint8_t name_len;
-    uint32_t size;
-    uint64_t offset; // 0: DELETED, 1: CREATED
-    char name[0];
+    struct hs *root;
 };
 
 struct hs_private {

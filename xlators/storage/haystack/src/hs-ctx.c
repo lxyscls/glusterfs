@@ -33,7 +33,7 @@
 
 int
 hs_mem_idx_dump(dict_t *d, char *k, data_t *v, void *_unused) {
-    struct hs_mem_idx *mem_idx = (struct hs_mem_idx *)v->data;
+    struct mem_idx *mem_idx = (struct mem_idx *)v->data;
 
     if (mem_idx) {
         printf("%s : %s %s %lu\n", k, uuid_utoa(mem_idx->buf.ia_gfid), mem_idx->name, mem_idx->offset);
@@ -44,7 +44,7 @@ hs_mem_idx_dump(dict_t *d, char *k, data_t *v, void *_unused) {
 
 static void 
 hs_mem_idx_free(void *to_free) {
-    struct hs_mem_idx *mem_idx = (struct hs_mem_idx *)to_free;
+    struct mem_idx *mem_idx = (struct mem_idx *)to_free;
 
     if (!mem_idx) {
         return;
@@ -56,7 +56,7 @@ hs_mem_idx_free(void *to_free) {
 
 static int
 hs_mem_idx_purge(dict_t *d, char *k, data_t *v, void *_unused) {
-    struct hs_mem_idx *mem_idx = (struct hs_mem_idx *)v->data;
+    struct mem_idx *mem_idx = (struct mem_idx *)v->data;
 
     if (mem_idx) {
         GF_REF_PUT(mem_idx);
@@ -65,9 +65,9 @@ hs_mem_idx_purge(dict_t *d, char *k, data_t *v, void *_unused) {
     return 0;
 }
 
-struct hs_idx *
-hs_idx_from_needle(struct hs_needle *needle, uint64_t offset) {
-    struct hs_idx *idx = NULL;
+struct idx *
+hs_idx_from_needle(struct needle *needle, uint64_t offset) {
+    struct idx *idx = NULL;
 
     idx = GF_CALLOC(1, sizeof(*idx)+NAME_MAX+1, gf_common_mt_char);    
     if (!idx) {
@@ -91,9 +91,9 @@ out:
     return idx;
 }
 
-struct hs_mem_idx *
-hs_mem_idx_from_needle(struct hs_needle *needle, uint64_t offset) {
-    struct hs_mem_idx *mem_idx = NULL;
+struct mem_idx *
+hs_mem_idx_from_needle(struct needle *needle, uint64_t offset) {
+    struct mem_idx *mem_idx = NULL;
 
     mem_idx = GF_CALLOC(1, sizeof(*mem_idx)+needle->name_len, gf_hs_mt_hs_mem_idx);
     if (!mem_idx) {
@@ -114,9 +114,9 @@ out:
     return mem_idx;
 }
 
-struct hs_mem_idx *
-hs_mem_idx_from_idx(struct hs_idx *idx) {
-    struct hs_mem_idx *mem_idx = NULL;
+struct mem_idx *
+hs_mem_idx_from_idx(struct idx *idx) {
+    struct mem_idx *mem_idx = NULL;
 
     mem_idx = GF_CALLOC(1, sizeof(*mem_idx)+idx->name_len, gf_hs_mt_hs_mem_idx);
     if (!mem_idx) {
@@ -145,12 +145,12 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
     int log_fd = -1;
     int idx_fd = -1;
     struct stat stbuf = {0};
-    struct hs_super super = {0};
+    struct super super = {0};
     ssize_t size = -1;
     uint64_t offset = 0;
-    struct hs_needle *needle = NULL;
-    struct hs_mem_idx *mem_idx = NULL;
-    struct hs_idx *idx = NULL;
+    struct needle *needle = NULL;
+    struct mem_idx *mem_idx = NULL;
+    struct idx *idx = NULL;
     char *buff = NULL;
     uint64_t left = 0;
     uint64_t shift = 0;
@@ -263,7 +263,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
 
         left = 0;
         while (left+sizeof(*needle) <= shift+size) {
-            needle = (struct hs_needle *)(buff+left);
+            needle = (struct needle *)(buff+left);
 
             /* incomplete name or payload */
             if (left+sizeof(*needle)+needle->name_len+needle->size > shift+size) {
@@ -334,7 +334,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
             GF_FREE(idx);
 
             left += (sizeof(*needle) + needle->name_len + needle->size);
-            hs->log_offset += (sizeof(struct hs_needle) + needle->name_len + needle->size);
+            hs->log_offset += (sizeof(*needle) + needle->name_len + needle->size);
         }
 
         if (left > 0 && left <= shift+size && left+sizeof(*needle) > shift+size) {
@@ -377,9 +377,9 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
     int fd = -1;
     ssize_t size = -1;
     char *rpath = NULL;
-    struct hs_needle *needle = NULL;
-    struct hs_mem_idx *mem_idx = NULL;
-    struct hs_idx *idx = NULL;
+    struct needle *needle = NULL;
+    struct mem_idx *mem_idx = NULL;
+    struct idx *idx = NULL;
     uint64_t offset = 0;
     char *buff = NULL;
     uint64_t left = 0;
@@ -447,7 +447,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
 
         left = 0;
         while (left+sizeof(*needle) <= shift+size) {
-            needle = (struct hs_needle *)(buff+left);
+            needle = (struct needle *)(buff+left);
 
             /* incomplete name or payload */
             if (left+sizeof(*needle)+needle->name_len+needle->size > shift+size) {
@@ -559,9 +559,9 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
     char *rpath = NULL;
     struct stat stbuf = {0};
     ssize_t size = -1;
-    struct hs_super super = {0};
-    struct hs_idx *idx = NULL;
-    struct hs_mem_idx *mem_idx =NULL;
+    struct super super = {0};
+    struct idx *idx = NULL;
+    struct mem_idx *mem_idx =NULL;
     uint64_t offset = 0;
     char *buff = NULL;
     uint64_t left = 0;
@@ -640,7 +640,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
 
         left = 0;
         while (left+sizeof(*idx) <= shift+size) {
-            idx = (struct hs_idx *)(buff+left);
+            idx = (struct idx *)(buff+left);
 
             /* incomplete name */
             if (left+sizeof(*idx)+idx->name_len > shift+size) {
@@ -680,7 +680,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
             }
 
             left += (sizeof(*idx) + idx->name_len);
-            hs->log_offset = idx->offset + sizeof(struct hs_needle) + idx->name_len + idx->size;
+            hs->log_offset = idx->offset + sizeof(struct needle) + idx->name_len + idx->size;
         }
 
         if (left > 0 && left <= shift+size && left+sizeof(*idx) > shift+size) {
