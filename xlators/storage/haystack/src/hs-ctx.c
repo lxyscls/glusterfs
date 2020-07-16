@@ -178,22 +178,6 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
     }
     sprintf(idx_rpath, "%s/.idx", hs->real_path);
 
-    buff = GF_CALLOC(1, BUFF_SIZE, gf_common_mt_char);
-    if (!buff) {
-        gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
-            "Fail to alloc build buffer: %s.", hs->real_path);
-        ret = -1;
-        goto err;
-    }
-
-    log_fd = sys_open(log_rpath, OFLAG, MODE);
-    if (log_fd == -1) {
-        gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_OPEN_FAILED,
-            "Fail to open log file: %s.", log_rpath);
-        ret = -1;
-        goto err;
-    }
-    
     ret = sys_stat(idx_rpath, &stbuf);
     if (!ret) {
         if (S_ISREG(stbuf.st_mode)) {
@@ -204,6 +188,22 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
             ret = -1;
             goto err;
         }
+    }
+
+    buff = GF_CALLOC(1, BUFF_SIZE, gf_common_mt_char);
+    if (!buff) {
+        gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
+            "Fail to alloc build buffer: %s.", hs->real_path);
+        ret = -1;
+        goto err;
+    }    
+
+    log_fd = sys_open(log_rpath, OFLAG, MODE);
+    if (log_fd == -1) {
+        gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_OPEN_FAILED,
+            "Fail to open log file: %s.", log_rpath);
+        ret = -1;
+        goto err;
     }
     
     idx_fd = sys_open(idx_rpath, COFLAG, MODE);
