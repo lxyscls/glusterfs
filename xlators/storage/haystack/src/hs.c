@@ -120,9 +120,9 @@ haystack_init(xlator_t *this) {
             "%s: failed to setup haystack context", private->base_path);        
         ret = -1;
         goto out;
-#ifdef HSDEBUG
+#ifdef HSDUMP
     } else {
-        kh_foreach(private->ctx->map, kvar, vvar, hs_dump(kvar, vvar));
+        kh_foreach(private->ctx->map, kvar, vvar, hs_dump(private->ctx->map, kvar, vvar));
 #endif
     }
 

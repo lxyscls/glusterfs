@@ -97,7 +97,7 @@ struct hs_private {
 
 struct hs_ctx *hs_ctx_init(xlator_t *this, const char *rpath);
 void hs_ctx_free(struct hs_ctx *ctx);
-void hs_dump(char *k, struct hs *v);
+void hs_dump(khash_t(hs) *map, char *k, struct hs *v);
 struct hs *hs_init(xlator_t *this, const char *rpath, struct hs *parent);
 
 #endif

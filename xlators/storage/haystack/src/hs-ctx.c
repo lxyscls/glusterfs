@@ -33,7 +33,7 @@
 #define BUFF_SIZE (128*1024)
 
 void
-hs_mem_idx_dump(char *k, struct mem_idx *v) {
+hs_mem_idx_dump(khash_t(mem_idx) *map, char *k, struct mem_idx *v) {
     if (v) {
         printf("%s : %s %s %lu\n", k, uuid_utoa(v->buf.ia_gfid), v->name, v->offset);
     }
@@ -811,15 +811,17 @@ err:
 }
 
 void
-hs_dump(char *k, struct hs *v) {
+hs_dump(khash_t(hs) *map, char *k, struct hs *v) {
     char *kvar = NULL;
     struct mem_idx *vvar = NULL;
 
     if (k && v) {
-        printf("%s : %s\n", k, v->real_path);
+        printf("%s : %s, %d needles\n", k, v->real_path, kh_size(v->map));
     }
 
-    kh_foreach(v->map, kvar, vvar, hs_mem_idx_dump(kvar, vvar));
+#ifdef IDXDUMP
+    kh_foreach(v->map, kvar, vvar, hs_mem_idx_dump(v->map, kvar, vvar));
+#endif
 }
 
 static void 
