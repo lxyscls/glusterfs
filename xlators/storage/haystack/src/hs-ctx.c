@@ -753,14 +753,12 @@ err:
 }
 
 int
-hs_dump(dict_t *d, char *k, data_t *v, void *_unused) {
-    struct hs *hs = (struct hs *)v->data;
-
-    if (hs) {
-        printf("%s : %s\n", uuid_utoa(hs->gfid), hs->real_path);
+hs_dump(char *k, struct hs *v) {
+    if (k && v) {
+        printf("%s : %s\n", k, v->real_path);
     }
 
-    dict_foreach(hs->idx_dict, hs_mem_idx_dump, NULL);
+    dict_foreach(v->idx_dict, hs_mem_idx_dump, NULL);
 
     return 0;
 }
@@ -799,11 +797,13 @@ hs_release(void *to_free) {
 }
 
 static int
-hs_purge(dict_t *d, char *k, data_t *v, void *_unused) {
-    struct hs *hs = (struct hs *)v->data;
+hs_purge(char *k, struct hs *v) {
+    if (k) {
+        GF_FREE(k);
+    }
 
-    if (hs) {
-        GF_REF_PUT(hs);
+    if (v) {
+        GF_REF_PUT(v);
     }
 
     return 0;
@@ -905,6 +905,8 @@ hs_setup(xlator_t *this, const char *rpath, struct hs *parent, struct hs_ctx *ct
     char *child_rpath = NULL;
     struct stat stbuf = {0};
     int ret = -1;
+    char *gfid = NULL;
+    khiter_t k = -1;
 
     hs = hs_init(this, rpath, parent);
     if (!hs) {
@@ -946,10 +948,33 @@ hs_setup(xlator_t *this, const char *rpath, struct hs *parent, struct hs_ctx *ct
         }
     }
 
-    ret = dict_set_static_bin(ctx->hs_dict, uuid_utoa(hs->gfid), hs, sizeof(*hs));
-    if (ret != 0) {
-        gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_ADD_FAILED,
-            "Fail to add haystack into context: %s", rpath);
+    gfid = gf_strdup(uuid_utoa(hs->gfid));
+    if (!gfid) {
+        gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
+            "Fail to alloc gfid str: (%s %s).", rpath, uuid_utoa(hs->gfid));
+        goto err;
+    }
+
+    LOCK(&ctx->lock);
+    {
+        k = kh_put(hs, ctx->map, gfid, &ret);
+        switch (ret) {
+            case -1:
+                gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_ADD_FAILED,
+                    "Fail to add hs into ctx: (%s %s).", rpath, gfid);
+                break;
+            case 0:
+                gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DUP_GFID,
+                    "Duplicate gfid: (%s %s).", rpath, gfid);
+                break;
+            default:
+                kh_value(ctx->map, k) = hs;
+                break;
+        }
+    }
+    UNLOCK(&ctx->lock);
+
+    if (ret <= 0) {
         goto err;
     }
 
@@ -973,12 +998,17 @@ err:
 
 void
 hs_ctx_free(struct hs_ctx *ctx) {
+    char *k = NULL;
+    struct hs *v = NULL;
+
     if (!ctx) {
         return;
     }
 
-    dict_foreach(ctx->hs_dict, hs_purge, NULL);
-    dict_unref(ctx->hs_dict);
+    kh_foreach(ctx->map, k, v, hs_purge(k, v));
+    kh_destroy(hs, ctx->map);
+    LOCK_DESTROY(&ctx->lock);
+
     GF_FREE(ctx);
 }
 
@@ -993,10 +1023,12 @@ hs_ctx_init(xlator_t *this, const char *rpath) {
         goto err;
     }
 
-    ctx->hs_dict = dict_new();
-    if (!ctx->hs_dict) {
+    LOCK_INIT(&ctx->lock);
+
+    ctx->map = kh_init(hs);
+    if (!ctx->map) {
         gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
-            "Fail to alloc haystack context dict: %s.", rpath);        
+            "Fail to alloc haystack context map: %s.", rpath);        
         goto err;
     }
 

@@ -13,8 +13,12 @@
 #include <glusterfs/glusterfs.h>
 #include <glusterfs/xlator.h>
 
+#include "khash.h"
+
 #define HSVERSION 1
 #define DELETED (1<<0)
+
+KHASH_MAP_INIT_STR(hs, struct hs *)
 
 struct super {
     uint8_t version;
@@ -71,7 +75,8 @@ struct hs {
 };
 
 struct hs_ctx {
-    dict_t *hs_dict;
+    gf_lock_t lock;
+    khash_t(hs) *map;
 
     struct hs *root;
 };
@@ -89,7 +94,7 @@ struct hs_private {
 
 struct hs_ctx *hs_ctx_init(xlator_t *this, const char *rpath);
 void hs_ctx_free(struct hs_ctx *ctx);
-int hs_dump(dict_t *d, char *k, data_t *v, void *_unused);
+int hs_dump(char *k, struct hs *v);
 struct hs *hs_init(xlator_t *this, const char *rpath, struct hs *parent);
 
 #endif

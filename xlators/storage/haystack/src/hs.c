@@ -38,6 +38,8 @@ haystack_init(xlator_t *this) {
     ssize_t size = -1;
     struct hs_private *private = NULL;
     static uuid_t rootgfid = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+    char *k = NULL;
+    struct hs *v = NULL;
 
     if (this->children) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_SUBVOLUME_ERROR,
@@ -120,7 +122,7 @@ haystack_init(xlator_t *this) {
         goto out;
 #ifdef HSDEBUG
     } else {
-        dict_foreach(private->ctx->hs_dict, hs_dump, NULL);
+        kh_foreach(private->ctx->map, k, v, hs_dump(k, v));
 #endif
     }
 
