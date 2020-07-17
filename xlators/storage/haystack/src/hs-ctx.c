@@ -822,7 +822,7 @@ hs_dump(khash_t(hs) *map, char *k, struct hs *v) {
     struct mem_idx *vvar = NULL;
 
     if (k && v) {
-        printf("%s : %s, %d needles\n", k, v->real_path, kh_size(v->map));
+        printf("%s : %s, %d needles %d buckets\n", k, v->real_path, kh_size(v->map), kh_n_buckets(v->map));
     }
 
 #ifdef IDXDUMP

@@ -41,6 +41,11 @@ haystack_init(xlator_t *this) {
     char *kvar = NULL;
     struct hs *vvar = NULL;
 
+    gf_msg(this->name, GF_LOG_INFO, 0, H_MSG_DEBUG,
+        "needle size %d, idx size %d, mem idx size %d, ref size %d, lock size %d.", 
+        sizeof(struct needle), sizeof(struct idx), sizeof(struct mem_idx),
+        sizeof(gf_ref_t), sizeof(gf_lock_t));
+
     if (this->children) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_SUBVOLUME_ERROR,
             "storage/haystack cannot have subvolumes.");
