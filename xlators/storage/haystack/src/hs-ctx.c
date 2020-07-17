@@ -376,7 +376,9 @@ err:
     }
 
     GF_FREE(gfid);
-    GF_REF_PUT(mem_idx);    
+    if (mem_idx) {
+        GF_REF_PUT(mem_idx);
+    }
 
     kh_foreach(hs->map, kvar, vvar, hs_mem_idx_purge(kvar, vvar));
     kh_clear(mem_idx, hs->map);
@@ -575,7 +577,9 @@ err:
     }
 
     GF_FREE(gfid);
-    GF_REF_PUT(mem_idx);
+    if (mem_idx) {
+        GF_REF_PUT(mem_idx);
+    }
 
     kh_foreach(hs->map, kvar, vvar, hs_mem_idx_purge(kvar, vvar));
     kh_clear(mem_idx, hs->map);
@@ -598,7 +602,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
     ssize_t size = -1;
     struct super super = {0};
     struct idx *idx = NULL;
-    struct mem_idx *mem_idx =NULL;
+    struct mem_idx *mem_idx = NULL;
     uint64_t offset = 0;
     char *buff = NULL;
     uint64_t left = 0;
@@ -620,7 +624,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
     ret = sys_stat(rpath, &stbuf);
     if (ret != 0) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_STAT_FAILED,
-            "idx file %s is missing.", rpath);
+            "Idx file %s stat failed.", rpath);
         ret = -1;     
         goto err;
     }
@@ -757,7 +761,9 @@ err:
     }
 
     GF_FREE(gfid);
-    GF_REF_PUT(mem_idx);    
+    if (mem_idx) {
+        GF_REF_PUT(mem_idx);
+    }
 
     kh_foreach(hs->map, kvar, vvar, hs_mem_idx_purge(kvar, vvar));
     kh_clear(mem_idx, hs->map);
