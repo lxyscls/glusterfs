@@ -1063,7 +1063,9 @@ err:
     GF_FREE(child_rpath);
 
     GF_FREE(gfid);
-    GF_REF_PUT(hs);
+    if (hs) {
+        GF_REF_PUT(hs);
+    }
 
     return NULL;
 }
