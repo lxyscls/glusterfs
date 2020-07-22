@@ -119,7 +119,7 @@ haystack_init(xlator_t *this) {
         goto out;
     }
 
-    private->ctx = hs_ctx_init(this, private->base_path);
+    private->ctx = hs_ctx_init(this);
     if (!private->ctx) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_CTX_FAILED,
             "%s: failed to setup haystack context", private->base_path);        

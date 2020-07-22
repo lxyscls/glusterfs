@@ -140,8 +140,8 @@ out:
 static int
 hs_slow_build(xlator_t *this, struct hs *hs) {
     int ret = -1;
-    char *log_rpath = NULL;
-    char *idx_rpath = NULL;
+    char *log_path = NULL;
+    char *idx_path = NULL;
     int log_fd = -1;
     int idx_fd = -1;
     struct stat stbuf = {0};
@@ -163,36 +163,33 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
 
     priv = this->private;
 
-    log_rpath = alloca(strlen(hs->real_path)+1+strlen(".log")+1);
-    sprintf(log_rpath, "%s/.log", hs->real_path);
+    MAKE_LOG_PATH(log_path, this, hs->path);
+    MAKE_IDX_PATH(idx_path, this, hs->path);
 
-    idx_rpath = alloca(strlen(hs->real_path)+1+strlen(".idx")+1);
-    sprintf(idx_rpath, "%s/.idx", hs->real_path);
-
-    ret = sys_stat(idx_rpath, &stbuf);
+    ret = sys_stat(idx_path, &stbuf);
     if (!ret) {
         if (S_ISREG(stbuf.st_mode)) {
-            sys_unlink(idx_rpath);
+            sys_unlink(idx_path);
         } else {
             gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_BAD_IDX_FILE,
-                "Idx file is not a regular file: %s.", idx_rpath);
+                "Idx file is not a regular file: %s.", idx_path);
             ret = -1;
             goto err;
         }
     }
 
-    log_fd = sys_open(log_rpath, OFLAG, MODE);
+    log_fd = sys_open(log_path, OFLAG, MODE);
     if (log_fd == -1) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_OPEN_FAILED,
-            "Fail to open log file: %s.", log_rpath);
+            "Fail to open log file: %s.", log_path);
         ret = -1;
         goto err;
     }
     
-    idx_fd = sys_open(idx_rpath, COFLAG, MODE);
+    idx_fd = sys_open(idx_path, COFLAG, MODE);
     if (idx_fd == -1) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_CREATE_FAILED,
-            "Fail to create idx file: %s.", idx_rpath);
+            "Fail to create idx file: %s.", idx_path);
         ret = -1;
         goto err;
     } 
@@ -200,7 +197,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
     size = sys_pread(log_fd, &super, sizeof(super), offset);
     if (size != sizeof(super) || super.version != HSVERSION || gf_uuid_compare(super.gfid, hs->gfid)) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_BROKEN_FILE,
-            "Broken super in log file: %s.", log_rpath);        
+            "Broken super in log file: %s.", log_path);        
         ret = -1;
         goto err;
     }
@@ -208,7 +205,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
     size = sys_pwrite(idx_fd, &super, sizeof(super), 0);
     if (size != sizeof(super)) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_WRITE_FAILED,
-            "Fail to write super into idx file: %s.", idx_rpath);        
+            "Fail to write super into idx file: %s.", idx_path);
         ret = -1;
         goto err;
     }    
@@ -221,7 +218,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
         size = sys_pread(log_fd, build_buf+shift, BUFF_SIZE-shift, offset);
         if (size < 0) {
             gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_READ_FAILED,
-                "Fail to read log file: %s.", log_rpath);            
+                "Fail to read log file: %s.", log_path);     
             ret = -1;
             goto err;
         }
@@ -229,7 +226,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
         if (size == 0) {
             if (shift > 0) {
                 gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_NEEDLE,
-                    "Broken needle: %s.", log_rpath);                 
+                    "Broken needle: %s.", log_path);                 
                 ret = -1;
                 goto err;
             }
@@ -239,7 +236,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
         /* incomplete needle */
         if (shift+size < sizeof(*needle)) {
             gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_NEEDLE,
-                "Broken needle: %s.", log_rpath);             
+                "Broken needle: %s.", log_path);             
             ret = -1;
             goto err;
         }
@@ -262,7 +259,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
                 crc = crc32(crc, (char *)needle+sizeof(*needle)+needle->name_len, needle->size);
                 if (crc != needle->crc) {
                     gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_BROKEN_NEEDLE,
-                        "CRC check failed (%s/%s %s).", hs->real_path, needle->data, uuid_utoa(needle->gfid));
+                        "CRC check failed (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
                     ret = -1;
                     goto err;
                 }
@@ -272,7 +269,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
             gfid = gf_strdup(uuid_utoa(needle->gfid));
             if (!gfid) {
                 gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
-                    "Fail to alloc gfid str: (%s/%s %s).", hs->real_path, needle->data, uuid_utoa(needle->gfid));
+                    "Fail to alloc gfid str: (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
                 ret = -1;
                 goto err;
             }
@@ -280,7 +277,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
             mem_idx = hs_mem_idx_from_needle(needle, hs->log_offset);
             if (!mem_idx) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_IDX_INIT_FAILED,
-                    "Fail to init mem idx (%s/%s %s).", hs->real_path, needle->data, uuid_utoa(needle->gfid));
+                    "Fail to init mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
                 ret = -1;
                 goto err;                     
             }
@@ -298,7 +295,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
                     switch (ret) {
                         case -1:
                             gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_ADD_FAILED,
-                                "Fail to add mem idx (%s/%s %s).", hs->real_path, needle->data, uuid_utoa(needle->gfid));
+                                "Fail to add mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
                             ret = -1;
                             goto err;
                         default:
@@ -314,7 +311,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
             idx = hs_idx_from_needle(needle, hs->log_offset);
             if (!idx) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_IDX_INIT_FAILED,
-                    "Fail to init idx (%s/%s %s).", hs->real_path, needle->data, uuid_utoa(needle->gfid));                     
+                    "Fail to init idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                     
                 ret = -1;
                 goto err;
             }
@@ -322,7 +319,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
             wsize = sys_write(idx_fd, idx, sizeof(*idx)+idx->name_len);
             if (wsize != sizeof(*idx)+idx->name_len) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_WRITE_FAILED,
-                    "Fail to write idx (%s/%s %s) into idx file.", hs->real_path, idx->name, uuid_utoa(needle->gfid));
+                    "Fail to write idx (%s/%s %s) into idx file.", hs->path, idx->name, uuid_utoa(needle->gfid));
                 GF_FREE(idx);
                 ret = -1;
                 goto err;
@@ -370,7 +367,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
     int ret = -1;
     int fd = -1;
     ssize_t size = -1;
-    char *rpath = NULL;
+    char *log_path = NULL;
     struct needle *needle = NULL;
     struct mem_idx *mem_idx = NULL;
     struct idx *idx = NULL;
@@ -387,13 +384,11 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
 
     priv = this->private;
 
-    rpath = alloca(strlen(hs->real_path)+1+strlen(".log")+1);
-    sprintf(rpath, "%s/.log", hs->real_path);
-
-    fd = sys_open(rpath, OFLAG, MODE);
+    MAKE_LOG_PATH(log_path, this, hs->path);
+    fd = sys_open(log_path, OFLAG, MODE);
     if (fd == -1) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_OPEN_FAILED,
-            "Fail to open log file: %s.", rpath);          
+            "Fail to open log file: %s.", log_path);          
         ret = -1;
         goto err;
     }
@@ -405,7 +400,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
         size = sys_pread(fd, build_buf+shift, BUFF_SIZE-shift, offset);
         if (size < 0) {
             gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_READ_FAILED,
-                "Fail to read log file: %s.", rpath);   
+                "Fail to read log file: %s.", log_path);   
             ret = -1;
             goto err;
         }
@@ -413,7 +408,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
         if (size == 0) {
             if (shift > 0) {
                 gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_NEEDLE,
-                    "Broken needle: %s.", rpath);                 
+                    "Broken needle: %s.", log_path);                 
                 ret = -1;
                 goto err;
             }
@@ -423,7 +418,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
         /* incomplete needle */
         if (shift+size < sizeof(*needle)) {          
             gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_NEEDLE,
-                "Broken needle: %s.", rpath);         
+                "Broken needle: %s.", log_path);         
             ret = -1;
             goto err;
         }
@@ -446,7 +441,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
                 crc = crc32(crc, (char *)needle+sizeof(*needle)+needle->name_len, needle->size);
                 if (crc != needle->crc) {
                     gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_BROKEN_NEEDLE,
-                        "CRC check failed (%s/%s %s).", hs->real_path, needle->data, uuid_utoa(needle->gfid));
+                        "CRC check failed (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
                     ret = -1;
                     goto err;
                 }
@@ -456,7 +451,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
             gfid = gf_strdup(uuid_utoa(needle->gfid));
             if (!gfid) {
                 gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
-                    "Fail to alloc gfid str: (%s/%s %s).", hs->real_path, needle->data, uuid_utoa(needle->gfid));
+                    "Fail to alloc gfid str: (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
                 ret = -1;
                 goto err;
             }
@@ -464,7 +459,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
             mem_idx = hs_mem_idx_from_needle(needle, hs->log_offset);
             if (!mem_idx) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_IDX_INIT_FAILED,
-                    "Fail to init mem idx (%s/%s %s).", hs->real_path, needle->data, uuid_utoa(needle->gfid));
+                    "Fail to init mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
                 ret = -1;
                 goto err;                     
             }
@@ -482,7 +477,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
                     switch (ret) {
                         case -1:
                             gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_ADD_FAILED,
-                                "Fail to add mem idx (%s/%s %s).", hs->real_path, needle->data, uuid_utoa(needle->gfid)); 
+                                "Fail to add mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid)); 
                             ret = -1;
                             goto err;
                         default:
@@ -498,7 +493,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
             idx = hs_idx_from_needle(needle, hs->log_offset);
             if (!idx) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_IDX_INIT_FAILED,
-                    "Fail to init idx (%s/%s %s).", hs->real_path, needle->data, uuid_utoa(needle->gfid));                     
+                    "Fail to init idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                     
                 ret = -1;
                 goto err;
             }
@@ -506,7 +501,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
             wsize = sys_write(hs->idx_fd, idx, sizeof(*idx)+idx->name_len);
             if (wsize != sizeof(*idx)+idx->name_len) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_WRITE_FAILED,
-                    "Fail to write idx (%s/%s %s) into idx file.", hs->real_path, idx->name, uuid_utoa(needle->gfid));
+                    "Fail to write idx (%s/%s %s) into idx file.", hs->path, idx->name, uuid_utoa(needle->gfid));
                 GF_FREE(idx);
                 ret = -1;
                 goto err;
@@ -552,7 +547,7 @@ static int
 hs_quick_build(xlator_t *this, struct hs *hs) {
     int fd = -1;
     int ret = -1;
-    char *rpath = NULL;
+    char *idx_path = NULL;
     struct stat stbuf = {0};
     ssize_t size = -1;
     struct super super = {0};
@@ -566,21 +561,19 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
     char *kvar = NULL;
     struct mem_idx *vvar = NULL;
 
-    rpath = alloca(strlen(hs->real_path)+1+strlen(".idx")+1);
-    sprintf(rpath, "%s/.idx", hs->real_path);
-
-    ret = sys_stat(rpath, &stbuf);
+    MAKE_IDX_PATH(idx_path, this, hs->path);
+    ret = sys_stat(idx_path, &stbuf);
     if (ret != 0) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_STAT_FAILED,
-            "Idx file %s stat failed.", rpath);
+            "Idx file %s stat failed.", idx_path);
         ret = -1;     
         goto err;
     }
 
-    fd = sys_open(rpath, OFLAG, MODE);
+    fd = sys_open(idx_path, OFLAG, MODE);
     if (fd == -1) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_OPEN_FAILED,
-            "Fail to open idx file: %s.", rpath);        
+            "Fail to open idx file: %s.", idx_path);        
         ret = -1;
         goto err;
     }
@@ -588,7 +581,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
     size = sys_pread(fd, &super, sizeof(super), offset);
     if (size != sizeof(super) || super.version != HSVERSION || gf_uuid_compare(super.gfid, hs->gfid)) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_BROKEN_FILE,
-            "Broken super in idx file: %s.", rpath);          
+            "Broken super in idx file: %s.", idx_path);          
         sys_close(fd);
         ret = -1;
         goto err;
@@ -602,7 +595,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
         size = sys_pread(fd, build_buf+shift, BUFF_SIZE-shift, offset);
         if (size < 0) {
             gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_READ_FAILED,
-                "Fail to read idx file: %s.", rpath);               
+                "Fail to read idx file: %s.", idx_path);               
             ret = -1;
             goto err;
         }
@@ -610,7 +603,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
         if (size == 0) { 
             if (shift > 0) {
                 gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_IDX,
-                    "Broken idx: %s.", rpath); 
+                    "Broken idx: %s.", idx_path); 
                 sys_ftruncate(fd, offset-shift);
             }
             break;
@@ -618,7 +611,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
 
         if (shift+size < sizeof(*idx)) {
             gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_IDX,
-                "Broken idx: %s.", rpath); 
+                "Broken idx: %s.", idx_path); 
             sys_ftruncate(fd, offset-shift);
             break;
         }
@@ -638,7 +631,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
             gfid = gf_strdup(uuid_utoa(idx->gfid));
             if (!gfid) {
                 gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
-                    "Fail to alloc gfid str: (%s/%s %s).", hs->real_path, idx->name, uuid_utoa(idx->gfid));
+                    "Fail to alloc gfid str: (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));
                 ret = -1;
                 goto err;
             }
@@ -646,7 +639,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
             mem_idx = hs_mem_idx_from_idx(idx);
             if (!mem_idx) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_IDX_INIT_FAILED,
-                    "Fail to init mem idx (%s/%s %s).", hs->real_path, idx->name, uuid_utoa(idx->gfid));
+                    "Fail to init mem idx (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));
                 ret = -1;
                 goto err;
             }
@@ -664,7 +657,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
                     switch (ret) {
                         case -1:
                             gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_ADD_FAILED,
-                                "Fail to add mem idx (%s/%s %s).", hs->real_path, idx->name, uuid_utoa(idx->gfid)); 
+                                "Fail to add mem idx (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid)); 
                             ret = -1;
                             goto err;
                         default:
@@ -713,15 +706,13 @@ static int
 hs_build(xlator_t *this, struct hs *hs) {
     int ret = -1;
     struct stat stbuf = {0};
-    char *log_rpath = NULL;
+    char *log_path = NULL;
 
-    log_rpath = alloca(strlen(hs->real_path)+1+strlen(".log")+1);
-    sprintf(log_rpath, "%s/.log", hs->real_path);
-
-    ret = sys_stat(log_rpath, &stbuf);
+    MAKE_LOG_PATH(log_path, this, hs->path);
+    ret = sys_stat(log_path, &stbuf);
     if (ret != 0) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_STAT_FAILED,
-            "Log file %s is missing.", log_rpath);
+            "Log file %s stat failed.", log_path);
         ret = -1;
         goto err;
     }
@@ -752,7 +743,7 @@ hs_dump(khash_t(hs) *map, char *k, struct hs *v) {
 #endif
 
     if (k && v) {
-        printf("%s : %s, %d needles %d buckets\n", k, v->real_path, kh_size(v->map), kh_n_buckets(v->map));
+        printf("%s : %s, %d needles %d buckets\n", k, v->path, kh_size(v->map), kh_n_buckets(v->map));
     }
 
 #ifdef IDXDUMP
@@ -792,7 +783,7 @@ hs_release(void *to_free) {
 
     LOCK_DESTROY(&hs->lock);
     pthread_rwlock_destroy(&hs->rwlock);
-    GF_FREE(hs->real_path);
+    GF_FREE(hs->path);
     GF_FREE(hs);
 }
 
@@ -810,24 +801,25 @@ hs_purge(char *k, struct hs *v) {
 }
 
 struct hs *
-hs_init(xlator_t *this, const char *rpath, struct hs *parent) {
+hs_init(xlator_t *this, const char *path, struct hs *parent) {
     ssize_t size = -1;
     int ret = -1;
     uuid_t gfid = {0}; 
     struct hs *hs = NULL;
+    char *real_path = NULL;
 
-    /* invalid directory */
-    size = sys_lgetxattr(rpath, "trusted.gfid", gfid, sizeof(gfid));
+    MAKE_REAL_PATH(real_path, this, path);
+    size = sys_lgetxattr(real_path, "trusted.gfid", gfid, sizeof(gfid));
     if (size != sizeof(gfid)) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_GFID_OPERATION_FAILED,
-            "Missing or wrong gfid: %s.", rpath);
+            "Missing or wrong gfid: %s.", path);
         goto err;
     }
 
     hs = (void *)GF_CALLOC(1, sizeof(struct hs), gf_hs_mt_hs);
     if (!hs) {
         gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
-            "Fail to alloc haystack: %s.", rpath);
+            "Fail to alloc haystack: %s.", path);
         goto err;
     }
 
@@ -837,19 +829,18 @@ hs_init(xlator_t *this, const char *rpath, struct hs *parent) {
 
     gf_uuid_copy(hs->gfid, gfid);
 
-    hs->real_path = gf_strdup(rpath);
-    if (!hs->real_path) {
+    hs->path = gf_strdup(path);
+    if (!hs->path) {
         gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
-            "Strdup failed: %s.", rpath);
+            "Strdup failed: %s.", path);
         goto err;
     }
 
     pthread_rwlock_init(&hs->rwlock, NULL);
-
     hs->map = kh_init(mem_idx);
     if (!hs->map) {
         gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
-            "Fail to alloc mem idx map: %s.", rpath);
+            "Fail to alloc mem idx map: %s.", path);
         goto err;        
     }
 
@@ -860,7 +851,7 @@ hs_init(xlator_t *this, const char *rpath, struct hs *parent) {
     ret = hs_build(this, hs);
     if (ret < 0) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_BUILD_FAILED,
-            "Fail to build haystack: %s.", rpath);
+            "Fail to build haystack: %s.", path);
         goto err;
     }
 
@@ -887,8 +878,8 @@ err:
             UNLOCK(&hs->parent->lock);
         }
 #endif
-        if (hs->real_path) {
-            GF_FREE(hs->real_path);
+        if (hs->path) {
+            GF_FREE(hs->path);
         }
 
         LOCK_DESTROY(&hs->lock);
@@ -900,52 +891,49 @@ err:
 }
 
 static struct hs *
-hs_setup(xlator_t *this, const char *rpath, struct hs *parent, struct hs_ctx *ctx) {
+hs_setup(xlator_t *this, const char *path, struct hs *parent, struct hs_ctx *ctx) {
     struct hs *hs = NULL;
     DIR *dir = NULL;
+    char *real_path = NULL;
+    char *child_path = NULL;    
     struct dirent *entry = NULL;
     struct dirent scratch[2] = {{0}};
-    char *child_rpath = NULL;
     struct stat stbuf = {0};
     int ret = -1;
     char *gfid = NULL;
     khiter_t k = -1;
 
-    hs = hs_init(this, rpath, parent);
+    hs = hs_init(this, path, parent);
     if (!hs) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_INIT_FAILED, 
-            "Fail to init haystack: %s.", rpath);         
+            "Fail to init haystack: %s.", path);         
         goto err;
     }
 
-    dir = sys_opendir(rpath);
+    MAKE_REAL_PATH(real_path, this, hs->path);
+    dir = sys_opendir(real_path);
     if (!dir) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_DIR_OPERATION_FAILED, 
-            "Fail to open directory: %s", rpath);     
+            "Fail to open directory: %s", path);     
         goto err;
-    }
-
-    child_rpath = GF_MALLOC(strlen(rpath)+1+NAME_MAX+1, gf_common_mt_char);
-    if (!child_rpath) {
-        gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
-            "Fail to alloc child path: %s.", rpath);
-        goto err;            
     }
 
     while ((entry=sys_readdir(dir, scratch)) != NULL) {
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) {
             continue;
         }
+
+        MAKE_CHILD_PATH(child_path, path, entry->d_name);
+        MAKE_REAL_PATH(real_path, this, child_path);
         
-        sprintf(child_rpath, "%s/%s", rpath, entry->d_name);
-        ret = sys_lstat(child_rpath, &stbuf);
+        ret = sys_lstat(real_path, &stbuf);
         if (ret < 0) {
             gf_msg(this->name, GF_LOG_WARNING, errno, H_MSG_LSTAT_FAILED,
-                "Fail to lstat: %s", child_rpath);
+                "Fail to lstat: %s", child_path);
         } else if (S_ISDIR(stbuf.st_mode)) {
-            if (!hs_setup(this, child_rpath, hs, ctx)) {
+            if (!hs_setup(this, child_path, hs, ctx)) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_SCAN_FAILED,
-                    "Fail to setup child haystack: %s.", child_rpath);
+                    "Fail to setup child haystack: %s.", child_path);
                 goto err;
             }
         }
@@ -954,7 +942,7 @@ hs_setup(xlator_t *this, const char *rpath, struct hs *parent, struct hs_ctx *ct
     gfid = gf_strdup(uuid_utoa(hs->gfid));
     if (!gfid) {
         gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
-            "Fail to alloc gfid str: (%s %s).", rpath, uuid_utoa(hs->gfid));
+            "Fail to alloc gfid str: (%s %s).", path, uuid_utoa(hs->gfid));
         goto err;
     }
 
@@ -964,11 +952,11 @@ hs_setup(xlator_t *this, const char *rpath, struct hs *parent, struct hs_ctx *ct
         switch (ret) {
             case -1:
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_ADD_FAILED,
-                    "Fail to add hs into ctx: (%s %s).", rpath, gfid);
+                    "Fail to add hs into ctx: (%s %s).", path, gfid);
                 break;
             case 0:
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DUP_GFID,
-                    "Duplicate gfid: (%s %s).", rpath, gfid);
+                    "Duplicate gfid: (%s %s).", path, gfid);
                 break;
             default:
                 kh_val(ctx->map, k) = hs;
@@ -982,7 +970,6 @@ hs_setup(xlator_t *this, const char *rpath, struct hs *parent, struct hs_ctx *ct
     }
 
     sys_closedir(dir);
-    GF_FREE(child_rpath);
 
     return hs;
 
@@ -990,7 +977,6 @@ err:
     if (dir) {
         sys_closedir(dir);
     }
-    GF_FREE(child_rpath);
 
     GF_FREE(gfid);
     if (hs) {
@@ -1017,13 +1003,13 @@ hs_ctx_free(struct hs_ctx *ctx) {
 }
 
 struct hs_ctx *
-hs_ctx_init(xlator_t *this, const char *rpath) {
+hs_ctx_init(xlator_t *this) {
     struct hs_ctx *ctx = NULL;
 
     ctx = (void *)GF_CALLOC(1, sizeof(struct hs_ctx), gf_hs_mt_hs_ctx);
     if (!ctx) {
         gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
-            "Fail to alloc haystack context: %s.", rpath);
+            "Fail to alloc haystack context.");
         goto err;
     }
 
@@ -1032,14 +1018,14 @@ hs_ctx_init(xlator_t *this, const char *rpath) {
     ctx->map = kh_init(hs);
     if (!ctx->map) {
         gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
-            "Fail to alloc haystack context map: %s.", rpath);        
+            "Fail to alloc haystack context map.");        
         goto err;
     }
 
-    ctx->root = hs_setup(this, rpath, NULL, ctx);
+    ctx->root = hs_setup(this, "/", NULL, ctx);
     if (!ctx->root) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_SCAN_FAILED,
-            "Fail to setup haystack: %s.", rpath);  
+            "Fail to setup haystack: /.");  
         goto err;
     }
 

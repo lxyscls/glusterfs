@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <dirent.h>
 #include <pthread.h>
+#include <alloca.h>
+#include <string.h>
 
 #include <glusterfs/dict.h>
 #include <glusterfs/refcount.h>
@@ -13,6 +15,7 @@
 #include <glusterfs/list.h>
 #include <glusterfs/glusterfs.h>
 #include <glusterfs/xlator.h>
+#include <glusterfs/stack.h>
 
 #include "khash.h"
 
@@ -63,7 +66,7 @@ struct hs {
     gf_lock_t lock;
 
     uuid_t gfid;
-    char *real_path;
+    char *path;
 
     struct hs *parent;
     struct list_head children;
@@ -95,7 +98,51 @@ struct hs_private {
     struct hs_ctx *ctx;
 };
 
-struct hs_ctx *hs_ctx_init(xlator_t *this, const char *rpath);
+#define HS_BASE_PATH(this)                                                     \
+    (((struct hs_private *)this->private)->base_path)
+
+#define HS_BASE_PATH_LEN(this)                                                 \
+    (((struct hs_private *)this->private)->base_path_length)
+
+#define MAKE_REAL_PATH(var, this, path)                                        \
+    do {                                                                       \
+        size_t var_len = strlen(path) + HS_BASE_PATH_LEN(this) + 1;            \
+        var = alloca(var_len);                                                 \
+        strcpy(var, HS_BASE_PATH(this));                                       \
+        strcpy(&var[HS_BASE_PATH_LEN(this)], path);                            \
+    } while (0)
+
+#define MAKE_LOG_PATH(var, this, path)                                         \
+    do {                                                                       \
+        size_t path_len = strlen(path);                                        \
+        size_t var_len = path_len + HS_BASE_PATH_LEN(this) + 5 + 1;            \
+        var = alloca(var_len);                                                 \
+        strcpy(var, HS_BASE_PATH(this));                                       \
+        strcpy(&var[HS_BASE_PATH_LEN(this)], path);                            \
+        strcpy(&var[HS_BASE_PATH_LEN(this)+path_len], "/.log");                \
+    } while (0)
+
+#define MAKE_IDX_PATH(var, this, path)                                         \
+    do {                                                                       \
+        size_t path_len = strlen(path);                                        \
+        size_t var_len = path_len + HS_BASE_PATH_LEN(this) + 5 + 1;            \
+        var = alloca(var_len);                                                 \
+        strcpy(var, HS_BASE_PATH(this));                                       \
+        strcpy(&var[HS_BASE_PATH_LEN(this)], path);                            \
+        strcpy(&var[HS_BASE_PATH_LEN(this)+path_len], "/.idx");                \
+    } while (0)
+
+#define MAKE_CHILD_PATH(var, path, child)                                      \
+    do {                                                                       \
+        size_t path_len = strlen(path);                                        \
+        size_t var_len = path_len + strlen(child) + 1 + 1;                     \
+        var = alloca(var_len);                                                 \
+        strcpy(var, path);                                                     \
+        strcpy(&var[path_len], "/");                                           \
+        strcpy(&var[path_len+1], child);                                       \
+    } while (0)               
+
+struct hs_ctx *hs_ctx_init(xlator_t *this);
 void hs_ctx_free(struct hs_ctx *ctx);
 void hs_dump(khash_t(hs) *map, char *k, struct hs *v);
 struct hs *hs_init(xlator_t *this, const char *rpath, struct hs *parent);
