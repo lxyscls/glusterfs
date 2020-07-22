@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <pthread.h>
+#include <alloca.h>
 
 #ifdef HAVE_LIB_Z
 #include "zlib.h"
@@ -31,6 +32,8 @@
 #define OFLAG (O_RDWR | O_APPEND)
 #define MODE (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
 #define BUFF_SIZE (128*1024)
+
+static __thread char build_buf[BUFF_SIZE] = {0};
 
 void
 hs_mem_idx_dump(khash_t(mem_idx) *map, char *k, struct mem_idx *v) {
@@ -148,7 +151,6 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
     struct needle *needle = NULL;
     struct mem_idx *mem_idx = NULL;
     struct idx *idx = NULL;
-    char *buff = NULL;
     uint64_t left = 0;
     uint64_t shift = 0;
     ssize_t wsize = -1;
@@ -161,22 +163,10 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
 
     priv = this->private;
 
-    log_rpath = GF_CALLOC(1, strlen(hs->real_path)+1+strlen(".log")+1, gf_common_mt_char);
-    if (!log_rpath) {
-        gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_NOMEM,
-            "Fail to alloc log file path: %s/.log.", hs->real_path);      
-        ret = -1;
-        goto err;
-    }
+    log_rpath = alloca(strlen(hs->real_path)+1+strlen(".log")+1);
     sprintf(log_rpath, "%s/.log", hs->real_path);
 
-    idx_rpath = GF_CALLOC(1, strlen(hs->real_path)+1+strlen(".idx")+1, gf_common_mt_char);
-    if (!idx_rpath) {
-        gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_NOMEM,
-            "Fail to alloc idx file path: %s/.idx.", hs->real_path);        
-        ret = -1;
-        goto err;
-    }
+    idx_rpath = alloca(strlen(hs->real_path)+1+strlen(".idx")+1);
     sprintf(idx_rpath, "%s/.idx", hs->real_path);
 
     ret = sys_stat(idx_rpath, &stbuf);
@@ -190,14 +180,6 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
             goto err;
         }
     }
-
-    buff = GF_CALLOC(1, BUFF_SIZE, gf_common_mt_char);
-    if (!buff) {
-        gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
-            "Fail to alloc build buffer: %s.", hs->real_path);
-        ret = -1;
-        goto err;
-    }    
 
     log_fd = sys_open(log_rpath, OFLAG, MODE);
     if (log_fd == -1) {
@@ -236,7 +218,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
 
     shift = 0;
     while (_gf_true) {
-        size = sys_pread(log_fd, buff+shift, BUFF_SIZE-shift, offset);
+        size = sys_pread(log_fd, build_buf+shift, BUFF_SIZE-shift, offset);
         if (size < 0) {
             gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_READ_FAILED,
                 "Fail to read log file: %s.", log_rpath);            
@@ -264,11 +246,11 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
 
         left = 0;
         while (left+sizeof(*needle) <= shift+size) {
-            needle = (struct needle *)(buff+left);
+            needle = (struct needle *)(build_buf+left);
 
             /* incomplete name or payload */
             if (left+sizeof(*needle)+needle->name_len+needle->size > shift+size) {
-                memcpy(buff, buff+left, shift+size-left);
+                memcpy(build_buf, build_buf+left, shift+size-left);
                 shift = shift+size-left;
                 left = 0;
                 break;                
@@ -352,7 +334,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
         }
 
         if (left > 0 && left <= shift+size && left+sizeof(*needle) > shift+size) {
-            memcpy(buff, buff+left, shift+size-left);
+            memcpy(build_buf, build_buf+left, shift+size-left);
             shift = shift+size-left;         
         }        
 
@@ -361,9 +343,6 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
 
     hs->log_fd = log_fd;
     hs->idx_fd = idx_fd;
-    GF_FREE(log_rpath);
-    GF_FREE(idx_rpath);
-    GF_FREE(buff);
     
     return 0;
 
@@ -383,10 +362,6 @@ err:
     kh_foreach(hs->map, kvar, vvar, hs_mem_idx_purge(kvar, vvar));
     kh_clear(mem_idx, hs->map);
 
-    GF_FREE(log_rpath);
-    GF_FREE(idx_rpath);
-    GF_FREE(buff);
-
     return ret;
 }
 
@@ -400,7 +375,6 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
     struct mem_idx *mem_idx = NULL;
     struct idx *idx = NULL;
     uint64_t offset = 0;
-    char *buff = NULL;
     uint64_t left = 0;
     uint64_t shift = 0;
     ssize_t wsize = -1;
@@ -413,22 +387,8 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
 
     priv = this->private;
 
-    rpath = GF_CALLOC(1, strlen(hs->real_path)+1+strlen(".log")+1, gf_common_mt_char);
-    if (!rpath) {
-        gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_NOMEM,
-            "Fail to alloc log file path: %s/.log.", hs->real_path);
-        ret = -1;
-        goto err;
-    }
+    rpath = alloca(strlen(hs->real_path)+1+strlen(".log")+1);
     sprintf(rpath, "%s/.log", hs->real_path);
-
-    buff = GF_CALLOC(1, BUFF_SIZE, gf_common_mt_char);
-    if (!buff) {
-        gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
-            "Fail to alloc build buffer: %s.", hs->real_path);
-        ret = -1;
-        goto err;
-    }
 
     fd = sys_open(rpath, OFLAG, MODE);
     if (fd == -1) {
@@ -442,7 +402,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
 
     shift = 0;
     while (_gf_true) {
-        size = sys_pread(fd, buff+shift, BUFF_SIZE-shift, offset);
+        size = sys_pread(fd, build_buf+shift, BUFF_SIZE-shift, offset);
         if (size < 0) {
             gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_READ_FAILED,
                 "Fail to read log file: %s.", rpath);   
@@ -470,11 +430,11 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
 
         left = 0;
         while (left+sizeof(*needle) <= shift+size) {
-            needle = (struct needle *)(buff+left);
+            needle = (struct needle *)(build_buf+left);
 
             /* incomplete name or payload */
             if (left+sizeof(*needle)+needle->name_len+needle->size > shift+size) {
-                memcpy(buff, buff+left, shift+size-left);
+                memcpy(build_buf, build_buf+left, shift+size-left);
                 shift = shift+size-left;
                 left = 0;
                 break;           
@@ -558,7 +518,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
         }
 
         if (left > 0 && left <= shift+size && left+sizeof(*needle) > shift+size) {
-            memcpy(buff, buff+left, shift+size-left);
+            memcpy(build_buf, build_buf+left, shift+size-left);
             shift = shift+size-left;         
         }
 
@@ -566,8 +526,6 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
     }
 
     hs->log_fd = fd;
-    GF_FREE(rpath);    
-    GF_FREE(buff);
     
     return 0;    
 
@@ -587,9 +545,6 @@ err:
     sys_close(hs->idx_fd);
     hs->idx_fd = -1;
 
-    GF_FREE(rpath);
-    GF_FREE(buff);
-
     return ret;
 }
 
@@ -604,7 +559,6 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
     struct idx *idx = NULL;
     struct mem_idx *mem_idx = NULL;
     uint64_t offset = 0;
-    char *buff = NULL;
     uint64_t left = 0;
     uint64_t shift = 0;
     char *gfid = NULL;
@@ -612,13 +566,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
     char *kvar = NULL;
     struct mem_idx *vvar = NULL;
 
-    rpath = GF_CALLOC(1, strlen(hs->real_path)+1+strlen(".idx")+1, gf_common_mt_char);
-    if (!rpath) {
-        gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
-            "Fail to alloc idx file path: %s/.idx.", hs->real_path);        
-        ret = -1;
-        goto err;
-    }
+    rpath = alloca(strlen(hs->real_path)+1+strlen(".idx")+1);
     sprintf(rpath, "%s/.idx", hs->real_path);
 
     ret = sys_stat(rpath, &stbuf);
@@ -628,14 +576,6 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
         ret = -1;     
         goto err;
     }
-
-    buff = GF_CALLOC(1, BUFF_SIZE, gf_common_mt_char);
-    if (!buff) {
-        gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
-            "Fail to alloc build buffer: %s.", hs->real_path);
-        ret = -1;
-        goto err;
-    }    
 
     fd = sys_open(rpath, OFLAG, MODE);
     if (fd == -1) {
@@ -659,7 +599,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
 
     shift = 0;
     while (_gf_true) {
-        size = sys_pread(fd, buff+shift, BUFF_SIZE-shift, offset);
+        size = sys_pread(fd, build_buf+shift, BUFF_SIZE-shift, offset);
         if (size < 0) {
             gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_READ_FAILED,
                 "Fail to read idx file: %s.", rpath);               
@@ -685,11 +625,11 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
 
         left = 0;
         while (left+sizeof(*idx) <= shift+size) {
-            idx = (struct idx *)(buff+left);
+            idx = (struct idx *)(build_buf+left);
 
             /* incomplete name */
             if (left+sizeof(*idx)+idx->name_len > shift+size) {
-                memcpy(buff, buff+left, shift+size-left);
+                memcpy(build_buf, build_buf+left, shift+size-left);
                 shift = shift+size-left;
                 left = 0;
                 break;
@@ -742,7 +682,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
         }
 
         if (left > 0 && left <= shift+size && left+sizeof(*idx) > shift+size) {
-            memcpy(buff, buff+left, shift+size-left);
+            memcpy(build_buf, build_buf+left, shift+size-left);
             shift = shift+size-left;
         }
 
@@ -750,8 +690,6 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
     }
 
     hs->idx_fd = fd;
-    GF_FREE(rpath);
-    GF_FREE(buff);
 
     return 0;
 
@@ -768,8 +706,6 @@ err:
     kh_foreach(hs->map, kvar, vvar, hs_mem_idx_purge(kvar, vvar));
     kh_clear(mem_idx, hs->map);
 
-    GF_FREE(rpath);
-    GF_FREE(buff);
     return ret;
 }
 
@@ -779,13 +715,7 @@ hs_build(xlator_t *this, struct hs *hs) {
     struct stat stbuf = {0};
     char *log_rpath = NULL;
 
-    log_rpath = GF_CALLOC(1, strlen(hs->real_path)+1+strlen(".log")+1, gf_common_mt_char);
-    if (!log_rpath) {
-        gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
-            "Fail to alloc log file path: %s/.log.", hs->real_path);
-        ret = -1;
-        goto err;
-    }
+    log_rpath = alloca(strlen(hs->real_path)+1+strlen(".log")+1);
     sprintf(log_rpath, "%s/.log", hs->real_path);
 
     ret = sys_stat(log_rpath, &stbuf);
@@ -808,18 +738,18 @@ hs_build(xlator_t *this, struct hs *hs) {
         goto err;
     }
 
-    GF_FREE(log_rpath);
     return 0;
 
 err:
-    GF_FREE(log_rpath);
     return ret;
 }
 
 void
 hs_dump(khash_t(hs) *map, char *k, struct hs *v) {
+#ifdef IDXDUMP    
     char *kvar = NULL;
     struct mem_idx *vvar = NULL;
+#endif
 
     if (k && v) {
         printf("%s : %s, %d needles %d buckets\n", k, v->real_path, kh_size(v->map), kh_n_buckets(v->map));
