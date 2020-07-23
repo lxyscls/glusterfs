@@ -303,6 +303,8 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
                 }
             }
 #endif
+            mem_idx = NULL;
+            den = NULL;
 
             k = kh_get(mem_idx, hs->map, uuid_utoa(needle->gfid));
             kk = kh_get(dentry, hs->lookup, needle->data);
@@ -419,6 +421,10 @@ err:
         GF_REF_PUT(mem_idx);
     }
 
+    if (den) {
+        GF_FREE(den);
+    }
+
     kh_foreach(hs->map, kvar, vvar, HS_MEM_IDX_PURGE(kvar, vvar));
     kh_clear(mem_idx, hs->map);
 
@@ -514,6 +520,8 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
                 }
             }
 #endif
+            mem_idx = NULL;
+            den = NULL;
 
             k = kh_get(mem_idx, hs->map, uuid_utoa(needle->gfid));
             kk = kh_get(dentry, hs->lookup, needle->data);
@@ -626,6 +634,10 @@ err:
         GF_REF_PUT(mem_idx);
     }
 
+    if (den) {
+        GF_FREE(den);
+    }
+
     kh_foreach(hs->map, kvar, vvar, HS_MEM_IDX_PURGE(kvar, vvar));
     kh_clear(mem_idx, hs->map);
 
@@ -723,6 +735,9 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
                 left = 0;
                 break;
             }
+
+            mem_idx = NULL;
+            den = NULL;
         
             k = kh_get(mem_idx, hs->map, uuid_utoa(idx->gfid));
             kk = kh_get(dentry, hs->lookup, idx->name);
