@@ -7,9 +7,10 @@ enum gf_hs_mem_types_ {
     gf_hs_mt_hs_private = gf_common_mt_end + 1,
     gf_hs_mt_hs_ctx,
     gf_hs_mt_hs,
-    gf_hs_mt_hs_idx,
-    gf_hs_mt_hs_mem_idx,
-    gf_hs_mt_hs_needle,
+    gf_hs_mt_idx,
+    gf_hs_mt_mem_idx,
+    gf_hs_mt_needle,
+    gf_hs_mt_dentry,
     gf_hs_mt_end
 };
 #endif

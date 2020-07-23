@@ -22,8 +22,17 @@
 #define HSVERSION 1
 #define DELETED (1<<0)
 
+#define DIR_T (1<<0)
+#define REG_T (1<<1)
+
 KHASH_MAP_INIT_STR(hs, struct hs *)
 KHASH_MAP_INIT_STR(mem_idx, struct mem_idx *)
+KHASH_MAP_INIT_STR(dentry, struct dentry *)
+
+struct dentry {
+    uuid_t gfid;
+    uint8_t type;
+};
 
 struct super {
     uint8_t version;
@@ -63,17 +72,20 @@ struct mem_idx {
 
 struct hs {
     GF_REF_DECL;
-    gf_lock_t lock;
 
     uuid_t gfid;
     char *path;
 
+    gf_lock_t lock;
     struct hs *parent;
     struct list_head children;
     struct list_head me;
 
-    pthread_rwlock_t rwlock;
+    pthread_rwlock_t map_lock;
     khash_t(mem_idx) *map;
+
+    pthread_rwlock_t lk_lock;
+    khash_t(dentry) *lookup;
 
     int log_fd;
     int idx_fd;
@@ -135,11 +147,15 @@ struct hs_private {
 #define MAKE_CHILD_PATH(var, path, child)                                      \
     do {                                                                       \
         size_t path_len = strlen(path);                                        \
-        size_t var_len = path_len + strlen(child) + 1 + 1;                     \
+        size_t var_len = path_len + strlen(child) + (path_len > 1 ? 2 : 1);    \
         var = alloca(var_len);                                                 \
         strcpy(var, path);                                                     \
-        strcpy(&var[path_len], "/");                                           \
-        strcpy(&var[path_len+1], child);                                       \
+        if (path_len > 1) {                                                    \
+            strcpy(&var[path_len], "/");                                       \
+            strcpy(&var[path_len+1], child);                                   \
+        } else {                                                               \
+            strcpy(&var[path_len], child);                                     \
+        }                                                                      \
     } while (0)               
 
 struct hs_ctx *hs_ctx_init(xlator_t *this);
