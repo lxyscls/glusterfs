@@ -127,21 +127,27 @@ struct hs_private {
 #define MAKE_LOG_PATH(var, this, path)                                         \
     do {                                                                       \
         size_t path_len = strlen(path);                                        \
-        size_t var_len = path_len + HS_BASE_PATH_LEN(this) + 5 + 1;            \
+        size_t var_len = path_len + HS_BASE_PATH_LEN(this) + (path_len > 1 ? 6 : 5);            \
         var = alloca(var_len);                                                 \
         strcpy(var, HS_BASE_PATH(this));                                       \
         strcpy(&var[HS_BASE_PATH_LEN(this)], path);                            \
-        strcpy(&var[HS_BASE_PATH_LEN(this)+path_len], "/.log");                \
+        if (path_len > 1)                                                      \
+            strcpy(&var[HS_BASE_PATH_LEN(this)+path_len], "/.log");            \
+        else                                                                   \
+            strcpy(&var[HS_BASE_PATH_LEN(this)+path_len], ".log");             \
     } while (0)
 
 #define MAKE_IDX_PATH(var, this, path)                                         \
     do {                                                                       \
         size_t path_len = strlen(path);                                        \
-        size_t var_len = path_len + HS_BASE_PATH_LEN(this) + 5 + 1;            \
+        size_t var_len = path_len + HS_BASE_PATH_LEN(this) + (path_len > 1 ? 6 : 5);            \
         var = alloca(var_len);                                                 \
         strcpy(var, HS_BASE_PATH(this));                                       \
         strcpy(&var[HS_BASE_PATH_LEN(this)], path);                            \
-        strcpy(&var[HS_BASE_PATH_LEN(this)+path_len], "/.idx");                \
+        if (path_len > 1)                                                      \
+            strcpy(&var[HS_BASE_PATH_LEN(this)+path_len], "/.idx");            \
+        else                                                                   \
+            strcpy(&var[HS_BASE_PATH_LEN(this)+path_len], ".idx");             \
     } while (0)
 
 #define MAKE_CHILD_PATH(var, path, child)                                      \
