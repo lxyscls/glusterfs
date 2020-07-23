@@ -210,7 +210,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
             sys_unlink(idx_path);
         } else {
             gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_BAD_IDX_FILE,
-                "Idx file is not a regular file: %s.", idx_path);
+                "Idx file is not a regular file: %s.", hs->path);
             ret = -1;
             goto err;
         }
@@ -219,7 +219,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
     log_fd = sys_open(log_path, OFLAG, MODE);
     if (log_fd == -1) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_OPEN_FAILED,
-            "Fail to open log file: %s.", log_path);
+            "Fail to open log file: %s.", hs->path);
         ret = -1;
         goto err;
     }
@@ -227,7 +227,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
     idx_fd = sys_open(idx_path, COFLAG, MODE);
     if (idx_fd == -1) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_CREATE_FAILED,
-            "Fail to create idx file: %s.", idx_path);
+            "Fail to create idx file: %s.", hs->path);
         ret = -1;
         goto err;
     } 
@@ -235,7 +235,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
     size = sys_pread(log_fd, &super, sizeof(super), offset);
     if (size != sizeof(super) || super.version != HSVERSION || gf_uuid_compare(super.gfid, hs->gfid)) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_BROKEN_FILE,
-            "Broken super in log file: %s.", log_path);        
+            "Broken super in log file: %s.", hs->path);        
         ret = -1;
         goto err;
     }
@@ -243,7 +243,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
     size = sys_pwrite(idx_fd, &super, sizeof(super), 0);
     if (size != sizeof(super)) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_WRITE_FAILED,
-            "Fail to write super into idx file: %s.", idx_path);
+            "Fail to write super into idx file: %s.", hs->path);
         ret = -1;
         goto err;
     }    
@@ -256,7 +256,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
         size = sys_pread(log_fd, build_buf+shift, BUFF_SIZE-shift, offset);
         if (size < 0) {
             gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_READ_FAILED,
-                "Fail to read log file: %s.", log_path);     
+                "Fail to read log file: %s.", hs->path);     
             ret = -1;
             goto err;
         }
@@ -264,7 +264,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
         if (size == 0) {
             if (shift > 0) {
                 gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_NEEDLE,
-                    "Broken needle: %s.", log_path);                 
+                    "Broken needle: %s.", hs->path);                 
                 ret = -1;
                 goto err;
             }
@@ -274,7 +274,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
         /* incomplete needle */
         if (shift+size < sizeof(*needle)) {
             gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_NEEDLE,
-                "Broken needle: %s.", log_path);             
+                "Broken needle: %s.", hs->path);             
             ret = -1;
             goto err;
         }
@@ -461,7 +461,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
     fd = sys_open(log_path, OFLAG, MODE);
     if (fd == -1) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_OPEN_FAILED,
-            "Fail to open log file: %s.", log_path);          
+            "Fail to open log file: %s.", hs->path);          
         ret = -1;
         goto err;
     }
@@ -473,7 +473,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
         size = sys_pread(fd, build_buf+shift, BUFF_SIZE-shift, offset);
         if (size < 0) {
             gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_READ_FAILED,
-                "Fail to read log file: %s.", log_path);   
+                "Fail to read log file: %s.", hs->path);   
             ret = -1;
             goto err;
         }
@@ -481,7 +481,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
         if (size == 0) {
             if (shift > 0) {
                 gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_NEEDLE,
-                    "Broken needle: %s.", log_path);                 
+                    "Broken needle: %s.", hs->path);                 
                 ret = -1;
                 goto err;
             }
@@ -491,7 +491,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
         /* incomplete needle */
         if (shift+size < sizeof(*needle)) {          
             gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_NEEDLE,
-                "Broken needle: %s.", log_path);         
+                "Broken needle: %s.", hs->path);         
             ret = -1;
             goto err;
         }
@@ -673,7 +673,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
     ret = sys_stat(idx_path, &stbuf);
     if (ret != 0) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_STAT_FAILED,
-            "Idx file %s stat failed.", idx_path);
+            "Idx file stat failed: %s.", hs->path);
         ret = -1;     
         goto err;
     }
@@ -681,7 +681,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
     fd = sys_open(idx_path, OFLAG, MODE);
     if (fd == -1) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_OPEN_FAILED,
-            "Fail to open idx file: %s.", idx_path);        
+            "Fail to open idx file: %s.", hs->path);        
         ret = -1;
         goto err;
     }
@@ -689,7 +689,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
     size = sys_pread(fd, &super, sizeof(super), offset);
     if (size != sizeof(super) || super.version != HSVERSION || gf_uuid_compare(super.gfid, hs->gfid)) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_BROKEN_FILE,
-            "Broken super in idx file: %s.", idx_path);          
+            "Broken super in idx file: %s.", hs->path);          
         sys_close(fd);
         ret = -1;
         goto err;
@@ -703,7 +703,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
         size = sys_pread(fd, build_buf+shift, BUFF_SIZE-shift, offset);
         if (size < 0) {
             gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_READ_FAILED,
-                "Fail to read idx file: %s.", idx_path);               
+                "Fail to read idx file: %s.", hs->path);               
             ret = -1;
             goto err;
         }
@@ -711,7 +711,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
         if (size == 0) { 
             if (shift > 0) {
                 gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_IDX,
-                    "Broken idx: %s.", idx_path); 
+                    "Broken idx: %s.", hs->path); 
                 sys_ftruncate(fd, offset-shift);
             }
             break;
@@ -719,7 +719,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
 
         if (shift+size < sizeof(*idx)) {
             gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_IDX,
-                "Broken idx: %s.", idx_path); 
+                "Broken idx: %s.", hs->path); 
             sys_ftruncate(fd, offset-shift);
             break;
         }
