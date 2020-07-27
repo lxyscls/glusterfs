@@ -2,37 +2,29 @@
 #define _HS_H
 
 #include <stdint.h>
-#include <dirent.h>
+#include <uuid/uuid.h>
 #include <pthread.h>
-#include <alloca.h>
+#include <dirent.h>
 #include <string.h>
+#include <alloca.h>
 
-#include <glusterfs/dict.h>
-#include <glusterfs/refcount.h>
-#include <glusterfs/compat.h>
 #include <glusterfs/iatt.h>
+#include <glusterfs/refcount.h>
 #include <glusterfs/locking.h>
-#include <glusterfs/list.h>
 #include <glusterfs/glusterfs.h>
-#include <glusterfs/xlator.h>
-#include <glusterfs/stack.h>
 
 #include "khash.h"
 
 #define HSVERSION 1
-#define DELETED (1<<0)
+#define F_DELETED (1<<0)
 
-#define DIR_T (1<<0)
-#define REG_T (1<<1)
+#define NON_T (1<<0)
+#define DIR_T (1<<1)
+#define REG_T (1<<2)
 
 KHASH_MAP_INIT_STR(hs, struct hs *)
 KHASH_MAP_INIT_STR(mem_idx, struct mem_idx *)
 KHASH_MAP_INIT_STR(dentry, struct dentry *)
-
-struct dentry {
-    uuid_t gfid;
-    uint8_t type;
-};
 
 struct super {
     uint8_t version;
@@ -58,6 +50,13 @@ struct idx {
     uint64_t offset;
     char name[0];
 } __attribute__ ((packed));
+
+struct dentry {
+    GF_REF_DECL;
+
+    uuid_t gfid;
+    uint8_t type;
+};
 
 struct mem_idx {
     GF_REF_DECL;
@@ -89,11 +88,11 @@ struct hs {
 
     int log_fd;
     int idx_fd;
-    uint64_t log_offset; // only used when startup.
+    uint64_t pos;
 };
 
 struct hs_ctx {
-    gf_lock_t lock;
+    pthread_rwlock_t lock;
     khash_t(hs) *map;
 
     struct hs *root;
@@ -162,11 +161,6 @@ struct hs_private {
         } else {                                                               \
             strcpy(&var[path_len], child);                                     \
         }                                                                      \
-    } while (0)               
-
-struct hs_ctx *hs_ctx_init(xlator_t *this);
-void hs_ctx_free(struct hs_ctx *ctx);
-void hs_dump(khash_t(hs) *map, char *k, struct hs *v);
-struct hs *hs_init(xlator_t *this, const char *rpath, struct hs *parent);
+    } while (0)
 
 #endif

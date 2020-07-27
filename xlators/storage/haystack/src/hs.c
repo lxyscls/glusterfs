@@ -11,6 +11,7 @@
 #include <glusterfs/options.h>
 
 #include "hs.h"
+#include "hs-ctx.h"
 #include "hs-mem-types.h"
 #include "hs-messages.h"
 
@@ -38,7 +39,7 @@ haystack_init(xlator_t *this) {
     ssize_t size = -1;
     struct hs_private *private = NULL;
     static uuid_t rootgfid = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
-    char *kvar = NULL;
+    const char *kvar = NULL;
     struct hs *vvar = NULL;
 
     gf_msg(this->name, GF_LOG_INFO, 0, H_MSG_DEBUG,
@@ -121,7 +122,7 @@ haystack_init(xlator_t *this) {
 
     private->ctx = hs_ctx_init(this);
     if (!private->ctx) {
-        gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_CTX_FAILED,
+        gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_CTX_INIT_FAILED,
             "%s: failed to setup haystack context", private->base_path);        
         ret = -1;
         goto out;
