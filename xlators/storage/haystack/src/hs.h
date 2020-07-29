@@ -8,7 +8,6 @@
 #include <string.h>
 #include <alloca.h>
 
-#include <glusterfs/iatt.h>
 #include <glusterfs/refcount.h>
 #include <glusterfs/locking.h>
 #include <glusterfs/glusterfs.h>
@@ -34,7 +33,6 @@ struct super {
 
 struct needle {
     uuid_t gfid;
-    struct iatt buf;
     uint8_t flags;
     uint32_t crc;
     uint8_t name_len;
@@ -44,7 +42,6 @@ struct needle {
 
 struct idx {
     uuid_t gfid;
-    struct iatt buf;
     uint8_t name_len;
     uint32_t size;
     uint64_t offset;
@@ -56,13 +53,12 @@ struct dentry {
 
     uuid_t gfid;
     uint8_t type;
+    struct mem_idx *mem_idx;
 };
 
 struct mem_idx {
     GF_REF_DECL;
 
-    gf_lock_t lock;
-    struct iatt buf;
     uint8_t name_len;
     uint32_t size;
     uint64_t offset; // 0: DELETED, 1: CREATED

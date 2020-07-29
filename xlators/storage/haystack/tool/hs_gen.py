@@ -23,7 +23,7 @@ def gen_needle(gfid, iatt):
     crc = zlib.crc32(buf) & 0xffffffff
 
     ret = struct.pack(NEEDLE_FMT_1, gfid.bytes)
-    ret = ret + iatt
+    # ret = ret + iatt
     ret = ret + struct.pack(NEEDLE_FMT_2, 0, crc, len(gfid.hex)+1, 1024)
     ret = ret + struct.pack('32sc', gfid.hex, '\0')
     ret = ret + buf
@@ -32,7 +32,7 @@ def gen_needle(gfid, iatt):
 
 def gen_idx(gfid, iatt, offset):
     ret = struct.pack(IDX_FMT_1, gfid.bytes)
-    ret = ret + iatt
+    # ret = ret + iatt
     ret = ret + struct.pack(IDX_FMT_2, len(gfid.hex)+1, 1024, offset)
     ret = ret + struct.pack('32sc', gfid.hex, '\0')
 

@@ -39,7 +39,7 @@ static __thread char build_buf[BUFF_SIZE] = {0};
 void
 mem_idx_dump(khash_t(mem_idx) *map, const char *k, struct mem_idx *v) {
     if (v) {
-        printf("%s : %s %s %lu\n", k, uuid_utoa(v->buf.ia_gfid), v->name, v->offset);
+        printf("%s : %s %lu\n", k, v->name, v->offset);
     }
 }
 
@@ -187,7 +187,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
                 goto err;             
             }            
 
-            den = dentry_from_needle(needle);
+            den = dentry_from_needle(needle, mem_idx);
             if (!den) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_INIT_FAILED,
                     "Fail to init dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
@@ -356,7 +356,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
                 goto err;             
             }            
 
-            den = dentry_from_needle(needle);
+            den = dentry_from_needle(needle, mem_idx);
             if (!den) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_INIT_FAILED,
                     "Fail to init dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
@@ -524,7 +524,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
                 goto err;             
             }            
 
-            den = dentry_from_idx(idx);
+            den = dentry_from_idx(idx, mem_idx);
             if (!den) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_INIT_FAILED,
                     "Fail to init dentry (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));

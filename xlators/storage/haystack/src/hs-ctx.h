@@ -98,17 +98,6 @@ hs_map_put(struct hs_ctx *ctx, uuid_t gfid, struct hs *vvar) {
     return ret;
 }
 
-static inline void 
-mem_idx_release(void *to_free) {
-    struct mem_idx *mem_idx = (struct mem_idx *)to_free;
-
-    if (!mem_idx)
-        return;
-
-    LOCK_DESTROY(&mem_idx->lock);
-    GF_FREE(mem_idx);
-}
-
 static inline struct idx *
 idx_from_needle(struct needle *needle, uint64_t offset) {
     struct idx *idx = NULL;
@@ -118,7 +107,6 @@ idx_from_needle(struct needle *needle, uint64_t offset) {
         goto out;
 
     gf_uuid_copy(idx->gfid, needle->gfid);
-    idx->buf = needle->buf;
     idx->name_len = needle->name_len;
     idx->size = needle->size;
     if (needle->flags & F_DELETED)
@@ -131,6 +119,16 @@ out:
     return idx;
 }
 
+static inline void 
+mem_idx_release(void *to_free) {
+    struct mem_idx *mem_idx = (struct mem_idx *)to_free;
+
+    if (!mem_idx)
+        return;
+
+    GF_FREE(mem_idx);
+}
+
 static inline struct mem_idx *
 mem_idx_from_needle(struct needle *needle, uint64_t offset) {
     struct mem_idx *mem_idx = NULL;
@@ -140,8 +138,6 @@ mem_idx_from_needle(struct needle *needle, uint64_t offset) {
         goto out;
 
     GF_REF_INIT(mem_idx, mem_idx_release);
-    LOCK_INIT(&mem_idx->lock);
-    mem_idx->buf = needle->buf;
     mem_idx->name_len = needle->name_len;
     mem_idx->size = needle->size;
     mem_idx->offset = offset;
@@ -160,8 +156,6 @@ mem_idx_from_idx(struct idx *idx) {
         goto out;
 
     GF_REF_INIT(mem_idx, mem_idx_release);
-    LOCK_INIT(&mem_idx->lock);
-    mem_idx->buf = idx->buf;
     mem_idx->name_len = idx->name_len;
     mem_idx->size = idx->size;
     mem_idx->offset = idx->offset;
@@ -257,39 +251,55 @@ mem_idx_map_put(struct hs *hs, uuid_t gfid, struct mem_idx *vvar) {
     return ret;
 }
 
+static inline void
+dentry_release(void *to_free) {
+    struct dentry *den = (struct dentry *)to_free;
+
+    if (!den)
+        return;
+
+    if (den->mem_idx)
+        GF_REF_PUT(den->mem_idx);
+    GF_FREE(den);
+}
+
 static inline struct dentry *
-dentry_from_needle(struct needle *needle) {
+dentry_from_needle(struct needle *needle, struct mem_idx *mem_idx) {
     struct dentry *den = NULL;
 
     den = GF_CALLOC(1, sizeof(*den), gf_hs_mt_dentry);
     if (!den)
         goto out;
 
-    GF_REF_INIT(den, NULL);
+    GF_REF_INIT(den, dentry_release);
     gf_uuid_copy(den->gfid, needle->gfid);
     if (needle->flags & F_DELETED)
         den->type = NON_T;
     else
         den->type = REG_T;
+    GF_REF_GET(mem_idx);
+    den->mem_idx = mem_idx;
 
 out:
     return den;    
 }
 
 static inline struct dentry *
-dentry_from_idx(struct idx *idx) {
+dentry_from_idx(struct idx *idx, struct mem_idx *mem_idx) {
     struct dentry *den = NULL;
 
     den = GF_CALLOC(1, sizeof(*den), gf_hs_mt_dentry);
     if (!den)
         goto out;
 
-    GF_REF_INIT(den, NULL);
+    GF_REF_INIT(den, dentry_release);
     gf_uuid_copy(den->gfid, idx->gfid);
     if (idx->offset > 0)
         den->type = REG_T;
     else
         den->type = NON_T;
+    GF_REF_GET(mem_idx);
+    den->mem_idx = mem_idx;
 
 out:
     return den;
@@ -303,9 +313,10 @@ dentry_from_dir(const char *path, uuid_t gfid) {
     if (!den)
         goto out;
 
-    GF_REF_INIT(den, NULL);
+    GF_REF_INIT(den, dentry_release);
     gf_uuid_copy(den->gfid, gfid);
     den->type = DIR_T;
+    den->mem_idx = NULL;
 
 out:
     return den;  
