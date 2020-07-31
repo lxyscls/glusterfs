@@ -11,6 +11,9 @@
 #include <glusterfs/refcount.h>
 #include <glusterfs/locking.h>
 #include <glusterfs/glusterfs.h>
+#include <glusterfs/stack.h>
+#include <glusterfs/xlator.h>
+#include <glusterfs/dict.h>
 
 #include "khash.h"
 
@@ -71,7 +74,7 @@ struct hs {
     uuid_t gfid;
     char *path;
 
-    gf_lock_t lock;
+    pthread_rwlock_t lock;
     struct hs *parent;
     struct list_head children;
     struct list_head me;
@@ -158,5 +161,8 @@ struct hs_private {
             strcpy(&var[path_len], child);                                     \
         }                                                                      \
     } while (0)
+
+int32_t 
+hs_lookup(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t * xdata);
 
 #endif

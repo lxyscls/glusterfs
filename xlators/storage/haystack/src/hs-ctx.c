@@ -612,7 +612,7 @@ hs_dump(khash_t(hs) *map, const char *k, struct hs *v) {
 static void 
 hs_release(void *to_free) {
     struct hs *hs = (struct hs *)to_free;
-    struct hs *child_hs = NULL;
+    struct hs *child = NULL;
     struct hs *tmp = NULL;
 
     if (!hs)
@@ -625,18 +625,18 @@ hs_release(void *to_free) {
     sys_close(hs->idx_fd);
 
     if (hs->parent) {
-        LOCK(&hs->parent->lock);
+        pthread_rwlock_wrlock(&hs->parent->lock);
         {
             list_del(&hs->me);
         }
-        UNLOCK(&hs->parent->lock);
+        pthread_rwlock_unlock(&hs->parent->lock);
     }
 
-    list_for_each_entry_safe(child_hs, tmp, &hs->children, me) {
-        GF_REF_PUT(child_hs);
+    list_for_each_entry_safe(child, tmp, &hs->children, me) {
+        GF_REF_PUT(child);
     }
 
-    LOCK_DESTROY(&hs->lock);
+    pthread_rwlock_destroy(&hs->lock);
     GF_FREE(hs->path);
     GF_FREE(hs);
 }
@@ -664,7 +664,7 @@ hs_init(xlator_t *this, const char *path, struct hs *parent) {
         goto err;
     }
 
-    LOCK_INIT(&hs->lock);
+    pthread_rwlock_init(&hs->lock, NULL);
     INIT_LIST_HEAD(&hs->children);
     INIT_LIST_HEAD(&hs->me);
 
@@ -698,11 +698,11 @@ hs_init(xlator_t *this, const char *path, struct hs *parent) {
 
     if (parent) {
         hs->parent = parent;
-        LOCK(&hs->parent->lock);
+        pthread_rwlock_wrlock(&hs->parent->lock);
         {
             list_add(&hs->me, &hs->parent->children);
         }
-        UNLOCK(&hs->parent->lock);
+        pthread_rwlock_unlock(&hs->parent->lock);
     }
 
     GF_REF_INIT(hs, hs_release);
@@ -711,16 +711,16 @@ hs_init(xlator_t *this, const char *path, struct hs *parent) {
 err:
     if (hs) {        
         if (hs->parent) {
-            LOCK(&hs->parent->lock);
+            pthread_rwlock_wrlock(&hs->parent->lock);
             {
                 list_del(&hs->me);
             }
-            UNLOCK(&hs->parent->lock);
+            pthread_rwlock_unlock(&hs->parent->lock);
         }
 
         if (hs->path)
             GF_FREE(hs->path);
-        LOCK_DESTROY(&hs->lock);
+        pthread_rwlock_destroy(&hs->lock);
         mem_idx_map_destroy(hs);
         dentry_map_destroy(hs);
         GF_FREE(hs);
@@ -731,7 +731,7 @@ err:
 static struct hs *
 hs_setup(xlator_t *this, const char *path, struct hs *parent, struct hs_ctx *ctx) {
     struct hs *hs = NULL;
-    struct hs *child_hs = NULL;
+    struct hs *child = NULL;
     DIR *dir = NULL;
     char *real_path = NULL;
     char *child_path = NULL;    
@@ -769,17 +769,17 @@ hs_setup(xlator_t *this, const char *path, struct hs *parent, struct hs_ctx *ctx
             gf_msg(this->name, GF_LOG_WARNING, errno, H_MSG_LSTAT_FAILED,
                 "Fail to lstat: %s", child_path);
         } else if (S_ISDIR(stbuf.st_mode)) {
-            child_hs = hs_setup(this, child_path, hs, ctx);
-            if (!child_hs) {
+            child = hs_setup(this, child_path, hs, ctx);
+            if (!child) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_SCAN_FAILED,
                     "Fail to setup child haystack: %s.", child_path);
                 goto err;
             }
 
-            den = dentry_from_dir(child_path, child_hs->gfid);
+            den = dentry_from_dir(child_path, child->gfid);
             if (!den) {
                 gf_msg(THIS->name, GF_LOG_ERROR, ENOMEM, H_MSG_DENTRY_INIT_FAILED,
-                    "Fail to alloc dentry for directory (%s %s).", child_path, uuid_utoa(child_hs->gfid)); 
+                    "Fail to alloc dentry for directory (%s %s).", child_path, uuid_utoa(child->gfid)); 
                 goto err;
             }
 

@@ -9,6 +9,7 @@
 #include <glusterfs/compat-errno.h>
 #include <glusterfs/logging.h>
 #include <glusterfs/options.h>
+#include <glusterfs/defaults.h>
 
 #include "hs.h"
 #include "hs-ctx.h"
@@ -39,8 +40,6 @@ haystack_init(xlator_t *this) {
     ssize_t size = -1;
     struct hs_private *private = NULL;
     static uuid_t rootgfid = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
-    const char *kvar = NULL;
-    struct hs *vvar = NULL;
 
     gf_msg(this->name, GF_LOG_INFO, 0, H_MSG_DEBUG,
         "needle size %d, idx size %d, mem idx size %d, ref size %d, lock size %d.", 
@@ -128,9 +127,13 @@ haystack_init(xlator_t *this) {
         goto out;
 #ifdef HSDUMP
     } else {
+        const char *kvar = NULL;
+        struct hs *vvar = NULL;        
         kh_foreach(private->ctx->map, kvar, vvar, hs_dump(private->ctx->map, kvar, vvar));
 #endif
     }
+
+    ret = 0;
 
 out:
     if (ret) {
@@ -158,7 +161,28 @@ haystack_fini(xlator_t *this) {
     GF_FREE(private);
 }
 
-struct xlator_fops fops;
+int
+haystack_notify(xlator_t *this, int32_t event, void *data, ...)
+{
+    int ret = 0;
+
+    switch (event) {
+        case GF_EVENT_PARENT_UP:
+            default_notify(this, GF_EVENT_CHILD_UP, data);
+            break;
+        case GF_EVENT_PARENT_DOWN:
+            default_notify(this->parents->xlator, GF_EVENT_CHILD_DOWN, data);
+            break;
+        default:
+            break;
+    }
+
+    return ret;
+}
+
+struct xlator_fops fops = {
+    .lookup = hs_lookup,
+};
 
 struct volume_options hs_options[] = {
     {.key = {"directory"},
@@ -171,7 +195,9 @@ struct volume_options hs_options[] = {
 xlator_api_t xlator_api = {
     .init = haystack_init,
     .fini = haystack_fini,
+    .notify = haystack_notify,
     .mem_acct_init = mem_acct_init,
     .fops = &fops,
     .options = hs_options,
+    .identifier = "haystack"
 };
