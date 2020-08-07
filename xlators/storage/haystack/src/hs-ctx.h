@@ -64,7 +64,7 @@ hs_map_get(struct hs_ctx *ctx, uuid_t gfid) {
         k = kh_get(hs, ctx->map, uuid_utoa(gfid));
         if (k != kh_end(ctx->map)) {
             vvar = kh_val(ctx->map, k);
-            //GF_REF_GET(vvar);
+            GF_REF_GET(vvar);
         }
     }
     pthread_rwlock_unlock(&ctx->lock);
@@ -217,7 +217,7 @@ mem_idx_map_get(struct hs *hs, uuid_t gfid) {
         k = kh_get(mem_idx, hs->map, uuid_utoa(gfid));
         if (k != kh_end(hs->map)) {
             vvar = kh_val(hs->map, k);
-            //GF_REF_GET(vvar);
+            GF_REF_GET(vvar);
         }
     }
     pthread_rwlock_unlock(&hs->map_lock);
@@ -374,7 +374,7 @@ dentry_map_get(struct hs *hs, const char *name) {
         k = kh_get(dentry, hs->lookup, name);
         if (k != kh_end(hs->lookup)) {
             vvar = kh_val(hs->lookup, k);
-            //GF_REF_GET(vvar);
+            GF_REF_GET(vvar);
         }
     }
     pthread_rwlock_unlock(&hs->lk_lock);
@@ -406,6 +406,55 @@ dentry_map_put(struct hs *hs, const char *name, struct dentry *vvar) {
     pthread_rwlock_unlock(&hs->lk_lock);
 
     return ret;
+}
+
+static inline void
+lookup_t_release(void *to_free) {
+    lookup_t *lk = (lookup_t *)to_free;
+
+    if (!lk)
+        return;
+
+    if (lk->type & DIR_T)
+        GF_REF_PUT(lk->hs);
+    if (lk->type & REG_T)
+        GF_REF_PUT(lk->mem_idx);
+
+    GF_FREE(lk);
+}
+
+static inline lookup_t *
+lookup_t_from_hs(struct hs *hs) {
+    lookup_t *lk = NULL;
+
+    lk = GF_CALLOC(1, sizeof(*lk), gf_hs_mt_lookup_t);
+    if (!lk)
+        goto out;
+
+    GF_REF_INIT(lk, lookup_t_release);
+    lk->type = DIR_T;
+    GF_REF_GET(hs);
+    lk->hs = hs;
+
+out:
+    return lk;
+}
+
+static inline lookup_t *
+lookup_t_from_mem_idx(struct mem_idx *mem_idx) {
+    lookup_t *lk = NULL;
+
+    lk = GF_CALLOC(1, sizeof(*lk), gf_hs_mt_lookup_t);
+    if (!lk)
+        goto out;
+
+    GF_REF_INIT(lk, lookup_t_release);
+    lk->type = REG_T;
+    GF_REF_GET(mem_idx);
+    lk->mem_idx = mem_idx;
+
+out:
+    return lk;
 }
 
 struct hs_ctx *hs_ctx_init(xlator_t *this);

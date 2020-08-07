@@ -226,6 +226,9 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
 
             left += (sizeof(*needle) + needle->name_len + needle->size);
             hs->pos += (sizeof(*needle) + needle->name_len + needle->size);
+
+            mem_idx = NULL;
+            den = NULL;
         }
 
         if (left > 0 && left <= shift+size && left+sizeof(*needle) > shift+size) {
@@ -394,7 +397,10 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
             GF_FREE(idx);
 
             left += (sizeof(*needle) + needle->name_len + needle->size); 
-            hs->pos += (sizeof(*needle) + needle->name_len + needle->size);  
+            hs->pos += (sizeof(*needle) + needle->name_len + needle->size);
+
+            mem_idx = NULL;
+            den = NULL;
         }
 
         if (left > 0 && left <= shift+size && left+sizeof(*needle) > shift+size) {
@@ -545,6 +551,9 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
 
             left += (sizeof(*idx) + idx->name_len);
             hs->pos = idx->offset + sizeof(struct needle) + idx->name_len + idx->size;
+
+            mem_idx = NULL;
+            den = NULL;
         }
 
         if (left > 0 && left <= shift+size && left+sizeof(*idx) > shift+size) {
@@ -618,8 +627,8 @@ hs_release(void *to_free) {
     if (!hs)
         return;
 
-    mem_idx_map_destroy(hs);
     dentry_map_destroy(hs);
+    mem_idx_map_destroy(hs);
 
     sys_close(hs->log_fd);
     sys_close(hs->idx_fd);
@@ -721,8 +730,8 @@ err:
         if (hs->path)
             GF_FREE(hs->path);
         pthread_rwlock_destroy(&hs->lock);
-        mem_idx_map_destroy(hs);
         dentry_map_destroy(hs);
+        mem_idx_map_destroy(hs);
         GF_FREE(hs);
     }
     return NULL;
@@ -793,6 +802,8 @@ hs_setup(xlator_t *this, const char *path, struct hs *parent, struct hs_ctx *ctx
                     "Fail to add dentry into lookup table: (%s %s).", path, entry->d_name);
                 goto err;
             }
+
+            den = NULL;
         }
     }
 
@@ -816,7 +827,8 @@ err:
         sys_closedir(dir);
     if (hs) 
         GF_REF_PUT(hs);
-    GF_FREE(den);
+    if (den)
+        GF_REF_PUT(den);
 
     return NULL;
 }

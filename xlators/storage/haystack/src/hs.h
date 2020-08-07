@@ -28,6 +28,9 @@ KHASH_MAP_INIT_STR(hs, struct hs *)
 KHASH_MAP_INIT_STR(mem_idx, struct mem_idx *)
 KHASH_MAP_INIT_STR(dentry, struct dentry *)
 
+struct _lookup;
+typedef struct _lookup lookup_t;
+
 struct super {
     uint8_t version;
     uuid_t gfid;
@@ -50,6 +53,21 @@ struct idx {
     uint64_t offset;
     char name[0];
 } __attribute__ ((packed));
+
+struct hs_fd {
+    DIR *dir;
+    struct hs *hs;
+};
+
+struct _lookup {
+    GF_REF_DECL;
+    
+    uint8_t type;
+    union {
+        struct hs *hs;
+        struct mem_idx *mem_idx;
+    };
+};
 
 struct dentry {
     GF_REF_DECL;
@@ -162,7 +180,24 @@ struct hs_private {
         }                                                                      \
     } while (0)
 
+/* helper functions */
+int
+hs_fd_ctx_get(fd_t *fd, xlator_t *this, struct hs_fd **hfd_p, int *op_errno_p);
+lookup_t *
+hs_do_lookup(xlator_t *this, uuid_t gfid, struct iatt *buf);
+
+/* inode ops functions */
 int32_t 
 hs_lookup(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t * xdata);
+
+/* file ops functions */
+int32_t
+hs_opendir(call_frame_t *frame, xlator_t *this, loc_t *loc, fd_t *fd, dict_t *xdata);
+int32_t
+hs_releasedir(xlator_t *this, fd_t *fd);
+int32_t
+hs_readdir(call_frame_t *frame, xlator_t *this, fd_t *fd, size_t size, off_t off, dict_t *xdata);
+int32_t
+hs_readdirp(call_frame_t *frame, xlator_t *this, fd_t *fd, size_t size, off_t off, dict_t *dict);
 
 #endif

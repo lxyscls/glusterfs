@@ -11,6 +11,8 @@ enum gf_hs_mem_types_ {
     gf_hs_mt_mem_idx,
     gf_hs_mt_needle,
     gf_hs_mt_dentry,
+    gf_hs_mt_hs_fd,
+    gf_hs_mt_lookup_t,
     gf_hs_mt_end
 };
 #endif
