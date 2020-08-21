@@ -57,16 +57,13 @@ struct idx {
 struct hs_fd {
     DIR *dir;
     struct hs *hs;
+    struct mem_idx *mem_idx;
 };
 
 struct _lookup {
-    GF_REF_DECL;
-    
     uint8_t type;
-    union {
-        struct hs *hs;
-        struct mem_idx *mem_idx;
-    };
+    struct hs *hs;
+    struct mem_idx *mem_idx;
 };
 
 struct dentry {
@@ -182,9 +179,9 @@ struct hs_private {
 
 /* helper functions */
 int
-hs_fd_ctx_get(fd_t *fd, xlator_t *this, struct hs_fd **hfd_p, int *op_errno_p);
-lookup_t *
-hs_do_lookup(xlator_t *this, uuid_t gfid, struct iatt *buf);
+hs_fd_ctx_get(fd_t *fd, xlator_t *this, struct hs_fd **hfd, int *op_errno);
+int
+hs_do_lookup(xlator_t *this, struct hs *hs, uuid_t gfid, struct iatt *buf, lookup_t **lk);
 
 /* inode ops functions */
 int32_t 
@@ -199,5 +196,7 @@ int32_t
 hs_readdir(call_frame_t *frame, xlator_t *this, fd_t *fd, size_t size, off_t off, dict_t *xdata);
 int32_t
 hs_readdirp(call_frame_t *frame, xlator_t *this, fd_t *fd, size_t size, off_t off, dict_t *dict);
+int32_t
+hs_releasedir(xlator_t *this, fd_t *fd);
 
 #endif

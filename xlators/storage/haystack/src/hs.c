@@ -180,10 +180,6 @@ haystack_notify(xlator_t *this, int32_t event, void *data, ...)
     return ret;
 }
 
-struct xlator_fops fops = {
-    .lookup = hs_lookup,
-};
-
 struct volume_options hs_options[] = {
     {.key = {"directory"},
      .type = GF_OPTION_TYPE_PATH,
@@ -192,12 +188,22 @@ struct volume_options hs_options[] = {
     {.key = {NULL}},
 };
 
+struct xlator_fops fops = {
+    .lookup = hs_lookup,
+};
+
+struct xlator_cbks cbks = {
+    //.releasedir = hs_releasedir,
+};
+
 xlator_api_t xlator_api = {
     .init = haystack_init,
     .fini = haystack_fini,
     .notify = haystack_notify,
     .mem_acct_init = mem_acct_init,
     .fops = &fops,
+    .cbks = &cbks,
     .options = hs_options,
-    .identifier = "haystack"
+    .identifier = "haystack",
+    .category = GF_EXPERIMENTAL,
 };

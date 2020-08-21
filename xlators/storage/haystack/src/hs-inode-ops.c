@@ -27,6 +27,7 @@ hs_lookup(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t * xdata) {
     char *real_path = NULL;
     char *child_path = NULL;
     char *log_path = NULL;
+    int ret = -1;
 
     struct hs_private *priv = NULL;
     struct hs_ctx *ctx = NULL;
@@ -51,13 +52,12 @@ hs_lookup(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t * xdata) {
             goto out;
         }
 
-        lk = hs_do_lookup(this, loc->gfid, &buf);
-        if (lk) {
-            op_ret = 0;
-        } else {
+        ret = hs_do_lookup(this, NULL, loc->gfid, &buf, &lk);
+        if (ret) {
             op_ret = -1;
-            op_errno = (errno != 0) ? errno : ENOENT;
-        }
+            op_errno = ESTALE;
+        } else
+            op_ret = 0;
     } else {
         if (gf_uuid_is_null(loc->pargfid) || !loc->name) {
             gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_ENTRY_HANDLE_CREATE,
@@ -134,7 +134,7 @@ out:
     if (den)
         GF_REF_PUT(den);
     if (lk)
-        GF_REF_PUT(lk);
+        lookup_t_release(lk);
     if (op_ret == 0)
         op_errno = 0;
 

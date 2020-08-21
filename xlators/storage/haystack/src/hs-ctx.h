@@ -415,43 +415,33 @@ lookup_t_release(void *to_free) {
     if (!lk)
         return;
 
-    if (lk->type & DIR_T)
+    if (lk->type == DIR_T) {
         GF_REF_PUT(lk->hs);
-    if (lk->type & REG_T)
+    } else if (lk->type == REG_T) {
+        GF_REF_PUT(lk->hs);
         GF_REF_PUT(lk->mem_idx);
+    }
 
     GF_FREE(lk);
 }
 
 static inline lookup_t *
-lookup_t_from_hs(struct hs *hs) {
+lookup_t_init(struct hs *hs, struct mem_idx *mem_idx, int8_t type) {
     lookup_t *lk = NULL;
 
     lk = GF_CALLOC(1, sizeof(*lk), gf_hs_mt_lookup_t);
     if (!lk)
         goto out;
 
-    GF_REF_INIT(lk, lookup_t_release);
-    lk->type = DIR_T;
-    GF_REF_GET(hs);
-    lk->hs = hs;
-
-out:
-    return lk;
-}
-
-static inline lookup_t *
-lookup_t_from_mem_idx(struct mem_idx *mem_idx) {
-    lookup_t *lk = NULL;
-
-    lk = GF_CALLOC(1, sizeof(*lk), gf_hs_mt_lookup_t);
-    if (!lk)
-        goto out;
-
-    GF_REF_INIT(lk, lookup_t_release);
-    lk->type = REG_T;
-    GF_REF_GET(mem_idx);
-    lk->mem_idx = mem_idx;
+    lk->type = type;
+    if (hs) {
+        GF_REF_GET(hs);
+        lk->hs = hs;
+    }
+    if (mem_idx) {
+        GF_REF_GET(mem_idx);
+        lk->mem_idx = mem_idx;
+    }
 
 out:
     return lk;
