@@ -100,6 +100,7 @@ hs_lookup(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t * xdata) {
             iatt_from_stat(&buf, &lstatbuf);
 
             gf_uuid_copy(buf.ia_gfid, den->gfid);
+            buf.ia_flags |= IATT_GFID;
             buf.ia_ino = gfid_to_ino(buf.ia_gfid);
             buf.ia_flags |= IATT_INO;            
         } else if (den->type == NON_T) {
@@ -123,6 +124,7 @@ hs_lookup(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t * xdata) {
             iatt_from_stat(&buf, &lstatbuf);
 
             gf_uuid_copy(buf.ia_gfid, den->gfid);
+            buf.ia_flags |= IATT_GFID;
             buf.ia_ino = gfid_to_ino(buf.ia_gfid);
             buf.ia_flags |= IATT_INO;            
         }

@@ -251,6 +251,20 @@ mem_idx_map_put(struct hs *hs, uuid_t gfid, struct mem_idx *vvar) {
     return ret;
 }
 
+#define __MEM_IDX_MAP_GET_NEXT(h, next, kvar, vvar) \
+    do {                                            \
+        khint_t __i = next;                         \
+        kvar = NULL;                                \
+        vvar = NULL;                                \
+        for (; __i < kh_end(h); ++__i) {            \
+		    if (!kh_exist(h,__i)) continue;         \
+		    (kvar) = kh_key(h,__i);                 \
+		    (vvar) = kh_val(h,__i);                 \
+            break;                                  \
+        }                                           \
+        next = ++__i;                               \
+    } while (0)
+
 static inline void
 dentry_release(void *to_free) {
     struct dentry *den = (struct dentry *)to_free;

@@ -190,10 +190,13 @@ struct volume_options hs_options[] = {
 
 struct xlator_fops fops = {
     .lookup = hs_lookup,
+    .opendir = hs_opendir,
+    .readdir = hs_readdir,
+    .readdirp = hs_readdirp
 };
 
 struct xlator_cbks cbks = {
-    //.releasedir = hs_releasedir,
+    .releasedir = hs_releasedir,
 };
 
 xlator_api_t xlator_api = {

@@ -56,6 +56,7 @@ struct idx {
 
 struct hs_fd {
     DIR *dir;
+    off_t dir_eof;
     struct hs *hs;
     struct mem_idx *mem_idx;
 };

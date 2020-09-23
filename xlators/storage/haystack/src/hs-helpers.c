@@ -54,6 +54,7 @@ hs_do_lookup(xlator_t *this, struct hs *hs, uuid_t gfid, struct iatt *buf, looku
             iatt_from_stat(buf, &lstatbuf);
 
             gf_uuid_copy(buf->ia_gfid, gfid);
+            buf->ia_flags |= IATT_GFID;
             buf->ia_ino = gfid_to_ino(buf->ia_gfid);
             buf->ia_flags |= IATT_INO;
         }
@@ -91,6 +92,7 @@ hs_do_lookup(xlator_t *this, struct hs *hs, uuid_t gfid, struct iatt *buf, looku
             iatt_from_stat(buf, &lstatbuf);
 
             gf_uuid_copy(buf->ia_gfid, gfid);
+            buf->ia_flags |= IATT_GFID;
             buf->ia_ino = gfid_to_ino(buf->ia_gfid);
             buf->ia_flags |= IATT_INO;
         }
@@ -116,7 +118,7 @@ hs_do_lookup(xlator_t *this, struct hs *hs, uuid_t gfid, struct iatt *buf, looku
             }
         }
     }
-    pthread_rwlock_unlock(&hs->lock);   
+    pthread_rwlock_unlock(&hs->lock);
 
 out:
     if (*lk == NULL) {
@@ -210,6 +212,7 @@ __hs_fd_ctx_get(fd_t *fd, xlator_t *this, struct hs_fd **hfd_p, int *op_errno_p)
     hfd->dir = dir;
     hfd->hs = lk->hs;
     hfd->mem_idx = lk->mem_idx;
+    hfd->dir_eof = -1;
 
     ret = __fd_ctx_set(fd, this, (uint64_t)(long)hfd);
     if (ret != 0) {
