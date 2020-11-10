@@ -336,6 +336,23 @@ out:
     return den;  
 }
 
+static inline struct dentry *
+dentry_from_hs(const char *path, struct hs *hs) {
+    struct dentry *den = NULL;
+
+    den = GF_CALLOC(1, sizeof(*den), gf_hs_mt_dentry);
+    if (!den)
+        goto out;
+
+    GF_REF_INIT(den, dentry_release);
+    gf_uuid_copy(den->gfid, hs->gfid);
+    den->type = DIR_T;
+    den->mem_idx = NULL;
+
+out:
+    return den;  
+}
+
 static inline void
 dentry_purge(const char *k, struct dentry *v) {
     if (k)
@@ -464,6 +481,6 @@ out:
 struct hs_ctx *hs_ctx_init(xlator_t *this);
 void hs_ctx_free(struct hs_ctx *ctx);
 void hs_dump(khash_t(hs) *map, const char *k, struct hs *v);
-struct hs *hs_init(xlator_t *this, const char *rpath, struct hs *parent);    
+struct hs *hs_init(xlator_t *this, struct hs *parent, const char *rpath);    
 
 #endif

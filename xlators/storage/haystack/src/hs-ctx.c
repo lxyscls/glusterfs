@@ -23,6 +23,7 @@
 #include <glusterfs/locking.h>
 #include <glusterfs/list.h>
 #include <glusterfs/xlator.h>
+#include <glusterfs/inode.h>
 
 #include "hs.h"
 #include "hs-ctx.h"
@@ -202,7 +203,6 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
             } else if (ret == -1) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_ADD_FAILED,
                     "Fail to add dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
-                ret = -1;
                 goto err;
             }
 
@@ -374,7 +374,6 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
             } else if (ret == -1) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_ADD_FAILED,
                     "Fail to add dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
-                ret = -1;
                 goto err;
             }
 
@@ -545,7 +544,6 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
             } else if (ret == -1) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_ADD_FAILED,
                     "Fail to add dentry (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));
-                ret = -1;
                 goto err;
             }
 
@@ -581,10 +579,11 @@ err:
 }
 
 static int
-hs_build(xlator_t *this, struct hs *hs) {
+hs_build(xlator_t *this, struct hs *parent, struct hs *hs) {
     int ret = -1;
     struct stat stbuf = {0};
     char *log_path = NULL;
+    struct dentry *den = NULL;
 
     MAKE_LOG_PATH(log_path, this, hs->path);
     ret = sys_stat(log_path, &stbuf);
@@ -597,9 +596,54 @@ hs_build(xlator_t *this, struct hs *hs) {
 
     ret = hs_quick_build(this, hs);
     if (ret < 0)
-        return hs_slow_build(this, hs);
+        ret = hs_slow_build(this, hs);
     else
-        return hs_orphan_build(this, hs);
+        ret = hs_orphan_build(this, hs);
+
+    if (ret != 0)
+        goto err;
+
+    den = dentry_from_hs(".", hs);
+    if (!den) {
+        gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_INIT_FAILED,
+            "Fail to init dentry (%s/%s %s).", hs->path, ".", uuid_utoa(hs->gfid));
+        ret = -1;
+        goto err;
+    }
+
+    ret = dentry_map_put(hs, ".", den);
+    if (ret == 0) {
+        gf_msg(this->name, GF_LOG_INFO, 0, H_MSG_DENTRY_UPDATE,
+            "Update dentry (%s/%s %s).", hs->path, ".", uuid_utoa(hs->gfid));                
+    } else if (ret == -1) {
+        gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_ADD_FAILED,
+            "Fail to add dentry (%s/%s %s).", hs->path, ".", uuid_utoa(hs->gfid));
+        goto err;
+    }
+
+    if (!parent) {
+        if (!__is_root_gfid(hs->gfid))
+            goto err;
+        return 0;
+    }
+
+    den = dentry_from_hs("..", parent);
+    if (!den) {
+        gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_INIT_FAILED,
+            "Fail to init dentry (%s/%s %s).", parent->path, "..", uuid_utoa(parent->gfid));
+        ret = -1;
+        goto err;
+    }
+
+    ret = dentry_map_put(hs, "..", den);
+    if (ret == 0) {
+        gf_msg(this->name, GF_LOG_INFO, 0, H_MSG_DENTRY_UPDATE,
+            "Update dentry (%s/%s %s).", parent->path, "..", uuid_utoa(parent->gfid));                
+    } else if (ret == -1) {
+        gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_ADD_FAILED,
+            "Fail to add dentry (%s/%s %s).", parent->path, "..", uuid_utoa(parent->gfid));
+        goto err;
+    }    
 
 err:
     return ret;
@@ -651,7 +695,7 @@ hs_release(void *to_free) {
 }
 
 struct hs *
-hs_init(xlator_t *this, const char *path, struct hs *parent) {
+hs_init(xlator_t *this, struct hs *parent, const char *path) {
     ssize_t size = -1;
     int ret = -1;
     uuid_t gfid = {0}; 
@@ -698,7 +742,7 @@ hs_init(xlator_t *this, const char *path, struct hs *parent) {
     hs->idx_fd = -1;
     hs->pos = 0;
 
-    ret = hs_build(this, hs);
+    ret = hs_build(this, parent, hs);
     if (ret < 0) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_BUILD_FAILED,
             "Fail to build haystack: %s.", path);
@@ -738,7 +782,7 @@ err:
 }
 
 static struct hs *
-hs_setup(xlator_t *this, const char *path, struct hs *parent, struct hs_ctx *ctx) {
+hs_setup(xlator_t *this, struct hs_ctx *ctx, struct hs *parent, const char *path) {
     struct hs *hs = NULL;
     struct hs *child = NULL;
     DIR *dir = NULL;
@@ -750,7 +794,7 @@ hs_setup(xlator_t *this, const char *path, struct hs *parent, struct hs_ctx *ctx
     int ret = -1;
     struct dentry *den = NULL;
 
-    hs = hs_init(this, path, parent);
+    hs = hs_init(this, parent, path);
     if (!hs) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_INIT_FAILED, 
             "Fail to init haystack: %s.", path);         
@@ -778,7 +822,7 @@ hs_setup(xlator_t *this, const char *path, struct hs *parent, struct hs_ctx *ctx
             gf_msg(this->name, GF_LOG_WARNING, errno, H_MSG_LSTAT_FAILED,
                 "Fail to lstat: %s", child_path);
         } else if (S_ISDIR(stbuf.st_mode)) {
-            child = hs_setup(this, child_path, hs, ctx);
+            child = hs_setup(this, ctx, hs, child_path);
             if (!child) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_SCAN_FAILED,
                     "Fail to setup child haystack: %s.", child_path);
@@ -860,7 +904,7 @@ hs_ctx_init(xlator_t *this) {
         goto err;
     }
 
-    ctx->root = hs_setup(this, "/", NULL, ctx);
+    ctx->root = hs_setup(this, ctx, NULL, "/");
     if (!ctx->root) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_SCAN_FAILED,
             "Fail to setup haystack: /.");  

@@ -154,12 +154,12 @@ hs_do_readdir(call_frame_t *frame, xlator_t *this, fd_t *fd, size_t size,
     struct dirent scratch[2] = {{0}};
     gf_dirent_t *this_entry = NULL;
     khint32_t next = 0;
+    char *in = NULL;
+    uuid_t gfid;
 
     struct hs_fd *hfd = NULL;
     struct hs *hs = NULL;
-    char *in = NULL;
-    uuid_t gfid;
-    struct mem_idx *mem_idx = NULL;
+    struct mem_idx *mem_idx = NULL; 
 
     VALIDATE_OR_GOTO(frame, out);
     VALIDATE_OR_GOTO(this, out);
@@ -205,7 +205,7 @@ hs_do_readdir(call_frame_t *frame, xlator_t *this, fd_t *fd, size_t size,
         in_case = (u_long)telldir(dir);
         if (in_case == -1) {
             op_errno = errno;
-            gf_msg(THIS->name, GF_LOG_ERROR, errno, H_MSG_DIR_OPERATION_FAILED,
+            gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_DIR_OPERATION_FAILED,
                    "telldir failed on dir=%p", dir);
             op_ret = -1;
             goto out;
@@ -216,7 +216,7 @@ hs_do_readdir(call_frame_t *frame, xlator_t *this, fd_t *fd, size_t size,
         if (!entry || errno != 0) {
             if (errno == EBADF) {
                 op_errno = errno;
-                gf_msg(THIS->name, GF_LOG_WARNING, errno,
+                gf_msg(this->name, GF_LOG_WARNING, errno,
                        H_MSG_DIR_OPERATION_FAILED, "readdir failed on dir=%p",
                        dir);
                 op_ret = -1;
@@ -236,7 +236,7 @@ hs_do_readdir(call_frame_t *frame, xlator_t *this, fd_t *fd, size_t size,
 
         this_entry = gf_dirent_for_name(entry->d_name);
         if (!this_entry) {
-            gf_msg(THIS->name, GF_LOG_ERROR, ENOMEM, H_MSG_GF_DIRENT_CREATE_FAILED,
+            gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_GF_DIRENT_CREATE_FAILED,
                 "Could not create gf_dirent for entry %s.", entry->d_name);
             op_ret = -1;
             op_errno = EBADF;            
