@@ -13,6 +13,7 @@
 #include <glusterfs/compat-uuid.h>
 #include <glusterfs/gf-dirent.h>
 #include <glusterfs/compat.h>
+#include <glusterfs/iatt.h>
 #include "glusterfs3-xdr.h"
 
 #include "hs.h"
@@ -320,4 +321,45 @@ hs_readdirp(call_frame_t *frame, xlator_t *this, fd_t *fd, size_t size,
     off_t off, dict_t *dict) {
     hs_do_readdir(frame, this, fd, size, off, GF_FOP_READDIRP, dict);
     return 0;    
+}
+
+int32_t
+hs_stat(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t *xdata) {
+    struct iatt buf = {0};
+    int32_t op_ret = -1;
+    int32_t op_errno = 0;
+
+    struct hs_private *priv = NULL;
+    struct hs_ctx *ctx = NULL;
+    lookup_t *lk = NULL;
+
+    VALIDATE_OR_GOTO(frame, out);
+    VALIDATE_OR_GOTO(this, out);
+    VALIDATE_OR_GOTO(loc, out);
+
+    priv = this->private;
+    ctx = priv->ctx;
+
+    if (gf_uuid_is_null(loc->gfid)) {
+        gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_INODE_HANDLE_CREATE,
+            "null gfid for path %s", loc->path);        
+        op_ret = -1;
+        op_errno = ESTALE;
+        goto out;
+    }
+
+    lk = hs_do_lookup(this, NULL, loc->gfid, &buf);
+    if (!lk) {
+        op_ret = -1;
+        op_errno = errno;
+    } else {
+        op_ret = 0;
+    }
+
+out:
+    STACK_UNWIND_STRICT(stat, frame, op_ret, op_errno, &buf, NULL);
+
+    if (lk)
+        lookup_t_release(lk);
+    return 0;
 }

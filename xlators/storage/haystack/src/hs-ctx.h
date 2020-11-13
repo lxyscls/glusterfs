@@ -446,12 +446,10 @@ lookup_t_release(void *to_free) {
     if (!lk)
         return;
 
-    if (lk->type == DIR_T) {
+    if (lk->hs)
         GF_REF_PUT(lk->hs);
-    } else if (lk->type == REG_T) {
-        GF_REF_PUT(lk->hs);
+    if (lk->mem_idx)
         GF_REF_PUT(lk->mem_idx);
-    }
 
     GF_FREE(lk);
 }
@@ -465,14 +463,8 @@ lookup_t_init(struct hs *hs, struct mem_idx *mem_idx, int8_t type) {
         goto out;
 
     lk->type = type;
-    if (hs) {
-        GF_REF_GET(hs);
-        lk->hs = hs;
-    }
-    if (mem_idx) {
-        GF_REF_GET(mem_idx);
-        lk->mem_idx = mem_idx;
-    }
+    lk->hs = hs;
+    lk->mem_idx = mem_idx;
 
 out:
     return lk;

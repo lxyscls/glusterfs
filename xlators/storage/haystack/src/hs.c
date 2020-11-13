@@ -192,7 +192,8 @@ struct xlator_fops fops = {
     .lookup = hs_lookup,
     .opendir = hs_opendir,
     .readdir = hs_readdir,
-    .readdirp = hs_readdirp
+    .readdirp = hs_readdirp,
+    .stat = hs_stat
 };
 
 struct xlator_cbks cbks = {

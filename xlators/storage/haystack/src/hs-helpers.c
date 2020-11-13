@@ -19,12 +19,13 @@
 #include "hs-messages.h"
 #include "hs-mem-types.h"
 
-int
-hs_do_lookup(xlator_t *this, struct hs *hs, uuid_t gfid, struct iatt *buf, lookup_t **lk) {
+lookup_t *
+hs_do_lookup(xlator_t *this, struct hs *hs, uuid_t gfid, struct iatt *buf) {
     int ret = -1;
     struct stat lstatbuf = {0};
     char *real_path = NULL;
     char *log_path = NULL;
+    lookup_t *lk = NULL;
     
     struct hs_private *priv = NULL;
     struct hs_ctx *ctx = NULL;
@@ -46,27 +47,27 @@ hs_do_lookup(xlator_t *this, struct hs *hs, uuid_t gfid, struct iatt *buf, looku
             MAKE_REAL_PATH(real_path, this, hs->path);
             ret = sys_lstat(real_path, &lstatbuf);
             if (ret) {       
-                gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_LSTAT_FAILED,
-                    "Fail to lstat: %s.", real_path);                
-                goto out;
+                gf_msg(this->name, GF_LOG_WARNING, errno, H_MSG_LSTAT_FAILED,
+                    "Fail to lstat: %s.", real_path);
+            } else {
+                iatt_from_stat(buf, &lstatbuf);
+
+                gf_uuid_copy(buf->ia_gfid, gfid);
+                buf->ia_flags |= IATT_GFID;
+                buf->ia_ino = gfid_to_ino(buf->ia_gfid);
+                buf->ia_flags |= IATT_INO;
             }
-
-            iatt_from_stat(buf, &lstatbuf);
-
-            gf_uuid_copy(buf->ia_gfid, gfid);
-            buf->ia_flags |= IATT_GFID;
-            buf->ia_ino = gfid_to_ino(buf->ia_gfid);
-            buf->ia_flags |= IATT_INO;
         }
 
-        *lk = lookup_t_init(hs, NULL, DIR_T);
-        if (*lk == NULL) {
+        lk = lookup_t_init(hs, NULL, DIR_T);
+        if (!lk) {
             gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_LOOKUPT_INIT_FAILED,
                 "Fail to alloc lookup_t: %s.", uuid_utoa(gfid));
-            ret = -1;
+            errno = ENOMEM;
             goto out;            
         }
 
+        errno = 0;
         goto out;
     }
 
@@ -75,7 +76,7 @@ hs_do_lookup(xlator_t *this, struct hs *hs, uuid_t gfid, struct iatt *buf, looku
         if (mem_idx->offset == 0) {
             gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_MEM_IDX_DEL,
                 "File has been deleted: %s.", uuid_utoa(gfid));
-            ret = -1;
+            errno = ENOENT;
             goto out;
         }
 
@@ -83,28 +84,28 @@ hs_do_lookup(xlator_t *this, struct hs *hs, uuid_t gfid, struct iatt *buf, looku
             MAKE_LOG_PATH(log_path, this, hs->path);
             ret = sys_lstat(log_path, &lstatbuf);
             if (ret) {
-                gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_LSTAT_FAILED,
+                gf_msg(this->name, GF_LOG_WARNING, errno, H_MSG_LSTAT_FAILED,
                     "Fail to lstat: %s.", log_path);
-                goto out;
+            } else {
+                lstatbuf.st_size = mem_idx->size;
+                iatt_from_stat(buf, &lstatbuf);
+
+                gf_uuid_copy(buf->ia_gfid, gfid);
+                buf->ia_flags |= IATT_GFID;
+                buf->ia_ino = gfid_to_ino(buf->ia_gfid);
+                buf->ia_flags |= IATT_INO;
             }
-
-            lstatbuf.st_size = mem_idx->size;
-            iatt_from_stat(buf, &lstatbuf);
-
-            gf_uuid_copy(buf->ia_gfid, gfid);
-            buf->ia_flags |= IATT_GFID;
-            buf->ia_ino = gfid_to_ino(buf->ia_gfid);
-            buf->ia_flags |= IATT_INO;
         }
 
-        *lk = lookup_t_init(hs, mem_idx, REG_T);
-        if (*lk == NULL) {
+        lk = lookup_t_init(hs, mem_idx, REG_T);
+        if (!lk) {
             gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_LOOKUPT_INIT_FAILED,
                 "Fail to alloc lookup_t: %s.", uuid_utoa(gfid));
-            ret = -1;
+            errno = ENOMEM;
             goto out;
         }
 
+        errno = 0;
         goto out;  
     }
 
@@ -112,8 +113,8 @@ hs_do_lookup(xlator_t *this, struct hs *hs, uuid_t gfid, struct iatt *buf, looku
     {
         list_for_each_entry(child, &hs->children, me) {
             GF_REF_GET(child);
-            ret = hs_do_lookup(this, child, gfid, buf, lk);
-            if (*lk || ret != 0) {
+            lk = hs_do_lookup(this, child, gfid, buf);
+            if (lk || errno != 0) {
                 break;
             }
         }
@@ -121,14 +122,13 @@ hs_do_lookup(xlator_t *this, struct hs *hs, uuid_t gfid, struct iatt *buf, looku
     pthread_rwlock_unlock(&hs->lock);
 
 out:
-    if (*lk == NULL) {
+    if (!lk) {
         if (hs)
             GF_REF_PUT(hs);
         if (mem_idx)
             GF_REF_PUT(mem_idx);
     }
-    
-    return ret;
+    return lk;
 }
 
 static int
@@ -161,8 +161,8 @@ __hs_fd_ctx_get(fd_t *fd, xlator_t *this, struct hs_fd **hfd_p, int *op_errno_p)
     }
 
     // slowpath
-    ret = hs_do_lookup(this, NULL, fd->inode->gfid, NULL, &lk);
-    if (ret) {
+    lk = hs_do_lookup(this, NULL, fd->inode->gfid, NULL);
+    if (!lk) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_LOOKUPT_FIND_FAILED,
                "Failed to do lookup (%s)", uuid_utoa(fd->inode->gfid));
         ret = -1;

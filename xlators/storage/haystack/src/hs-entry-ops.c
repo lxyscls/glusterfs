@@ -27,7 +27,6 @@ hs_lookup(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t * xdata) {
     char *real_path = NULL;
     char *child_path = NULL;
     char *log_path = NULL;
-    int ret = -1;
 
     struct hs_private *priv = NULL;
     struct hs_ctx *ctx = NULL;
@@ -52,8 +51,8 @@ hs_lookup(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t * xdata) {
             goto out;
         }
 
-        ret = hs_do_lookup(this, NULL, loc->gfid, &buf, &lk);
-        if (ret) {
+        lk = hs_do_lookup(this, NULL, loc->gfid, &buf);
+        if (!lk) {
             op_ret = -1;
             op_errno = ESTALE;
         } else
