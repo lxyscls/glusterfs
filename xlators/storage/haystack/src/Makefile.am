@@ -5,7 +5,7 @@ xlatordir = $(libdir)/glusterfs/$(PACKAGE_VERSION)/xlator/storage
 
 haystack_la_LDFLAGS = -module $(GF_XLATOR_DEFAULT_LDFLAGS)
 
-haystack_la_SOURCES = hs.c hs-ctx.c hs-inode-ops.c hs-file-ops.c hs-helpers.c
+haystack_la_SOURCES = hs.c hs-ctx.c hs-inode-fd-ops.c hs-entry-ops.c hs-helpers.c
 haystack_la_LIBADD = $(top_builddir)/libglusterfs/src/libglusterfs.la $(ZLIB_LIBS)
 
 noinst_HEADERS = hs.h hs-ctx.h hs-messages.h hs-mem-types.h khash.h
