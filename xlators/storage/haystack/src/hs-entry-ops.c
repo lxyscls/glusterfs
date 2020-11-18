@@ -15,6 +15,7 @@
 
 #include "hs.h"
 #include "hs-ctx.h"
+#include "hs-helpers.h"
 #include "hs-messages.h"
 
 int32_t 
@@ -92,7 +93,7 @@ hs_lookup(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t * xdata) {
             if (op_ret == -1) {
                 op_errno = errno;                
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_LSTAT_FAILED,
-                    "Fail to lstat: %s.", child_path);
+                    "Failed to lstat: %s.", child_path);
                 goto out;
             }
 
@@ -115,7 +116,7 @@ hs_lookup(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t * xdata) {
             if (op_ret == -1) {
                 op_errno = errno;                
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_LSTAT_FAILED,
-                    "Fail to lstat: %s.", log_path);
+                    "Failed to lstat: %s.", log_path);
                 goto out;
             }
 
@@ -136,8 +137,6 @@ out:
         GF_REF_PUT(den);
     if (lk)
         lookup_t_release(lk);
-    if (op_ret == 0)
-        op_errno = 0;
 
     STACK_UNWIND_STRICT(lookup, frame, op_ret, op_errno,
                     (loc) ? loc->inode : NULL, &buf, NULL, &postparent);

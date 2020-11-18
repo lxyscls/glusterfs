@@ -16,6 +16,7 @@
 
 #include "hs.h"
 #include "hs-ctx.h"
+#include "hs-helpers.h"
 #include "hs-messages.h"
 #include "hs-mem-types.h"
 
@@ -32,14 +33,11 @@ hs_do_lookup(xlator_t *this, struct hs *hs, uuid_t gfid, struct iatt *buf) {
     struct hs *child = NULL;
     struct mem_idx *mem_idx = NULL;
 
-    VALIDATE_OR_GOTO(this, out);
-
     if (!hs) {
         priv = this->private;
         ctx = priv->ctx;
 
-        hs = ctx->root;
-        GF_REF_GET(hs);
+        hs = GF_REF_GET(ctx->root);
     }
 
     if (!gf_uuid_compare(hs->gfid, gfid)) {
@@ -48,7 +46,7 @@ hs_do_lookup(xlator_t *this, struct hs *hs, uuid_t gfid, struct iatt *buf) {
             ret = sys_lstat(real_path, &lstatbuf);
             if (ret) {       
                 gf_msg(this->name, GF_LOG_WARNING, errno, H_MSG_LSTAT_FAILED,
-                    "Fail to lstat: %s.", real_path);
+                    "Failed to lstat: %s.", real_path);
             } else {
                 iatt_from_stat(buf, &lstatbuf);
 
@@ -62,7 +60,7 @@ hs_do_lookup(xlator_t *this, struct hs *hs, uuid_t gfid, struct iatt *buf) {
         lk = lookup_t_init(hs, NULL, DIR_T);
         if (!lk) {
             gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_LOOKUPT_INIT_FAILED,
-                "Fail to alloc lookup_t: %s.", uuid_utoa(gfid));
+                "Failed to alloc lookup_t: %s.", uuid_utoa(gfid));
             errno = ENOMEM;
             goto out;            
         }
@@ -85,7 +83,7 @@ hs_do_lookup(xlator_t *this, struct hs *hs, uuid_t gfid, struct iatt *buf) {
             ret = sys_lstat(log_path, &lstatbuf);
             if (ret) {
                 gf_msg(this->name, GF_LOG_WARNING, errno, H_MSG_LSTAT_FAILED,
-                    "Fail to lstat: %s.", log_path);
+                    "Failed to lstat: %s.", log_path);
             } else {
                 lstatbuf.st_size = mem_idx->size;
                 iatt_from_stat(buf, &lstatbuf);
@@ -100,7 +98,7 @@ hs_do_lookup(xlator_t *this, struct hs *hs, uuid_t gfid, struct iatt *buf) {
         lk = lookup_t_init(hs, mem_idx, REG_T);
         if (!lk) {
             gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_LOOKUPT_INIT_FAILED,
-                "Fail to alloc lookup_t: %s.", uuid_utoa(gfid));
+                "Failed to alloc lookup_t: %s.", uuid_utoa(gfid));
             errno = ENOMEM;
             goto out;
         }
@@ -122,12 +120,11 @@ hs_do_lookup(xlator_t *this, struct hs *hs, uuid_t gfid, struct iatt *buf) {
     pthread_rwlock_unlock(&hs->lock);
 
 out:
-    if (!lk) {
-        if (hs)
-            GF_REF_PUT(hs);
-        if (mem_idx)
-            GF_REF_PUT(mem_idx);
-    }
+    if (hs)
+        GF_REF_PUT(hs);
+    if (mem_idx)
+        GF_REF_PUT(mem_idx);
+
     return lk;
 }
 
@@ -173,7 +170,7 @@ __hs_fd_ctx_get(fd_t *fd, xlator_t *this, struct hs_fd **hfd_p, int *op_errno_p)
     hfd = GF_CALLOC(1, sizeof(*hfd), gf_hs_mt_lookup_t);
     if (!hfd) {
         gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_HFD_INIT_FAILED,
-            "Fail to alloc hfd: %p.", fd);        
+            "Failed to alloc hfd: %p.", fd);        
         ret = -1;
         op_errno = ENOMEM;
         goto out;
@@ -193,7 +190,7 @@ __hs_fd_ctx_get(fd_t *fd, xlator_t *this, struct hs_fd **hfd_p, int *op_errno_p)
         if (!dir) {
             op_errno = errno;
             gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_OPENDIR_FAILED,
-                "Fail to open directory: %s.", real_path);
+                "Failed to open directory: %s.", real_path);
             ret = -1;
             goto out;
         }

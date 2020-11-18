@@ -27,6 +27,7 @@
 
 #include "hs.h"
 #include "hs-ctx.h"
+#include "hs-helpers.h"
 #include "hs-mem-types.h"
 #include "hs-messages.h"
 
@@ -85,7 +86,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
     log_fd = sys_open(log_path, OFLAG, MODE);
     if (log_fd == -1) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_OPEN_FAILED,
-            "Fail to open log file: %s.", hs->path);
+            "Failed to open log file: %s.", hs->path);
         ret = -1;
         goto err;
     }
@@ -93,7 +94,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
     idx_fd = sys_open(idx_path, COFLAG, MODE);
     if (idx_fd == -1) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_CREATE_FAILED,
-            "Fail to create idx file: %s.", hs->path);
+            "Failed to create idx file: %s.", hs->path);
         ret = -1;
         goto err;
     } 
@@ -109,7 +110,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
     size = sys_pwrite(idx_fd, &super, sizeof(super), 0);
     if (size != sizeof(super)) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_WRITE_FAILED,
-            "Fail to write super into idx file: %s.", hs->path);
+            "Failed to write super into idx file: %s.", hs->path);
         ret = -1;
         goto err;
     }    
@@ -122,7 +123,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
         size = sys_pread(log_fd, build_buf+shift, BUFF_SIZE-shift, offset);
         if (size < 0) {
             gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_READ_FAILED,
-                "Fail to read log file: %s.", hs->path);     
+                "Failed to read log file: %s.", hs->path);     
             ret = -1;
             goto err;
         }
@@ -147,6 +148,8 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
 
         left = 0;
         while (left+sizeof(*needle) <= shift+size) {
+            den = NULL;
+            mem_idx = NULL;
             needle = (struct needle *)(build_buf+left);
 
             /* incomplete name or payload */
@@ -169,10 +172,10 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
                 }
             }
 #endif
-            mem_idx = mem_idx_from_needle(needle, hs->pos);
+            mem_idx = mem_idx_init(needle->data, needle->name_len, needle->size, hs->pos);
             if (!mem_idx) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_MEM_IDX_INIT_FAILED,
-                    "Fail to init mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
+                    "Failed to init mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
                 ret = -1;
                 goto err;                  
             }
@@ -183,15 +186,15 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
                     "Update mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                 
             } else if (ret == -1) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_MEM_IDX_ADD_FAILED,
-                    "Fail to add mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid)); 
+                    "Failed to add mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid)); 
                 ret = -1;
                 goto err;             
             }            
 
-            den = dentry_from_needle(needle, mem_idx);
+            den = dentry_init(needle->gfid, (needle->flags & F_DELETED) ? NON_T : REG_T, mem_idx);
             if (!den) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_INIT_FAILED,
-                    "Fail to init dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
+                    "Failed to init dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
                 ret = -1;
                 goto err;                    
             }
@@ -202,14 +205,14 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
                     "Update dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                
             } else if (ret == -1) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_ADD_FAILED,
-                    "Fail to add dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
+                    "Failed to add dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
                 goto err;
             }
 
             idx = idx_from_needle(needle, hs->pos);
             if (!idx) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_IDX_INIT_FAILED,
-                    "Fail to init idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                     
+                    "Failed to init idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                     
                 ret = -1;
                 goto err;
             }
@@ -217,7 +220,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
             wsize = sys_write(idx_fd, idx, sizeof(*idx)+idx->name_len);
             if (wsize != sizeof(*idx)+idx->name_len) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_WRITE_FAILED,
-                    "Fail to write idx (%s/%s %s) into idx file.", hs->path, idx->name, uuid_utoa(needle->gfid));
+                    "Failed to write idx (%s/%s %s) into idx file.", hs->path, idx->name, uuid_utoa(needle->gfid));
                 GF_FREE(idx);
                 ret = -1;
                 goto err;
@@ -227,8 +230,8 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
             left += (sizeof(*needle) + needle->name_len + needle->size);
             hs->pos += (sizeof(*needle) + needle->name_len + needle->size);
 
-            mem_idx = NULL;
-            den = NULL;
+            GF_REF_PUT(den);
+            GF_REF_PUT(mem_idx);
         }
 
         if (left > 0 && left <= shift+size && left+sizeof(*needle) > shift+size) {
@@ -248,10 +251,12 @@ err:
         sys_close(log_fd);
     if (idx_fd >= 0)
         sys_close(idx_fd);
+
+    if (den)
+        GF_REF_PUT(den);        
     if (mem_idx)
         GF_REF_PUT(mem_idx);
-    if (den)
-        GF_REF_PUT(den);
+
     mem_idx_map_clear(hs);
     dentry_map_clear(hs);
 
@@ -281,7 +286,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
     fd = sys_open(log_path, OFLAG, MODE);
     if (fd == -1) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_OPEN_FAILED,
-            "Fail to open log file: %s.", hs->path);          
+            "Failed to open log file: %s.", hs->path);          
         ret = -1;
         goto err;
     }
@@ -293,7 +298,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
         size = sys_pread(fd, build_buf+shift, BUFF_SIZE-shift, offset);
         if (size < 0) {
             gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_READ_FAILED,
-                "Fail to read log file: %s.", hs->path);   
+                "Failed to read log file: %s.", hs->path);   
             ret = -1;
             goto err;
         }
@@ -318,6 +323,8 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
 
         left = 0;
         while (left+sizeof(*needle) <= shift+size) {
+            den = NULL;
+            mem_idx = NULL;
             needle = (struct needle *)(build_buf+left);
 
             /* incomplete name or payload */
@@ -340,10 +347,10 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
                 }
             }
 #endif
-            mem_idx = mem_idx_from_needle(needle, hs->pos);
+            mem_idx = mem_idx_init(needle->data, needle->name_len, needle->size, hs->pos);
             if (!mem_idx) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_MEM_IDX_INIT_FAILED,
-                    "Fail to init mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
+                    "Failed to init mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
                 ret = -1;
                 goto err;                  
             }
@@ -354,15 +361,15 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
                     "Update mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                 
             } else if (ret == -1) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_MEM_IDX_ADD_FAILED,
-                    "Fail to add mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid)); 
+                    "Failed to add mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid)); 
                 ret = -1;
                 goto err;             
             }            
 
-            den = dentry_from_needle(needle, mem_idx);
+            den = dentry_init(needle->gfid, (needle->flags & F_DELETED) ? NON_T : REG_T, mem_idx);
             if (!den) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_INIT_FAILED,
-                    "Fail to init dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
+                    "Failed to init dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
                 ret = -1;
                 goto err;                    
             }
@@ -373,14 +380,14 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
                     "Update dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                
             } else if (ret == -1) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_ADD_FAILED,
-                    "Fail to add dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
+                    "Failed to add dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
                 goto err;
             }
 
             idx = idx_from_needle(needle, hs->pos);
             if (!idx) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_IDX_INIT_FAILED,
-                    "Fail to init idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                     
+                    "Failed to init idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                     
                 ret = -1;
                 goto err;
             }
@@ -388,7 +395,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
             wsize = sys_write(hs->idx_fd, idx, sizeof(*idx)+idx->name_len);
             if (wsize != sizeof(*idx)+idx->name_len) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_WRITE_FAILED,
-                    "Fail to write idx (%s/%s %s) into idx file.", hs->path, idx->name, uuid_utoa(needle->gfid));
+                    "Failed to write idx (%s/%s %s) into idx file.", hs->path, idx->name, uuid_utoa(needle->gfid));
                 GF_FREE(idx);
                 ret = -1;
                 goto err;
@@ -398,8 +405,8 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
             left += (sizeof(*needle) + needle->name_len + needle->size); 
             hs->pos += (sizeof(*needle) + needle->name_len + needle->size);
 
-            mem_idx = NULL;
-            den = NULL;
+            GF_REF_PUT(den);
+            GF_REF_PUT(mem_idx);
         }
 
         if (left > 0 && left <= shift+size && left+sizeof(*needle) > shift+size) {
@@ -416,14 +423,16 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
 err:
     if (fd > 0)
         sys_close(fd);
-    if (mem_idx)
-        GF_REF_PUT(mem_idx);
+    sys_close(hs->idx_fd);
+    hs->idx_fd = -1;        
+
     if (den)
         GF_REF_PUT(den);
+    if (mem_idx)
+        GF_REF_PUT(mem_idx);
+
     mem_idx_map_clear(hs);
     dentry_map_clear(hs);
-    sys_close(hs->idx_fd);
-    hs->idx_fd = -1;
 
     return ret;
 }
@@ -455,7 +464,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
     fd = sys_open(idx_path, OFLAG, MODE);
     if (fd == -1) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_OPEN_FAILED,
-            "Fail to open idx file: %s.", hs->path);        
+            "Failed to open idx file: %s.", hs->path);        
         ret = -1;
         goto err;
     }
@@ -477,7 +486,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
         size = sys_pread(fd, build_buf+shift, BUFF_SIZE-shift, offset);
         if (size < 0) {
             gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_READ_FAILED,
-                "Fail to read idx file: %s.", hs->path);               
+                "Failed to read idx file: %s.", hs->path);               
             ret = -1;
             goto err;
         }
@@ -500,6 +509,8 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
 
         left = 0;
         while (left+sizeof(*idx) <= shift+size) {
+            den = NULL;
+            mem_idx = NULL;
             idx = (struct idx *)(build_buf+left);
 
             /* incomplete name */
@@ -510,10 +521,10 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
                 break;
             }
 
-            mem_idx = mem_idx_from_idx(idx);
+            mem_idx = mem_idx_init(idx->name, idx->name_len, idx->size, idx->offset);
             if (!mem_idx) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_MEM_IDX_INIT_FAILED,
-                    "Fail to init mem idx (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));
+                    "Failed to init mem idx (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));
                 ret = -1;
                 goto err;
             }
@@ -524,15 +535,15 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
                     "Update mem idx (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));                 
             } else if (ret == -1) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_MEM_IDX_ADD_FAILED,
-                    "Fail to add mem idx (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid)); 
+                    "Failed to add mem idx (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid)); 
                 ret = -1;
                 goto err;             
             }            
 
-            den = dentry_from_idx(idx, mem_idx);
+            den = dentry_init(idx->gfid, (idx->offset > 0) ? REG_T : NON_T, mem_idx);
             if (!den) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_INIT_FAILED,
-                    "Fail to init dentry (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));
+                    "Failed to init dentry (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));
                 ret = -1;
                 goto err;                    
             }
@@ -543,15 +554,15 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
                     "Update dentry (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));                
             } else if (ret == -1) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_ADD_FAILED,
-                    "Fail to add dentry (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));
+                    "Failed to add dentry (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));
                 goto err;
             }
 
             left += (sizeof(*idx) + idx->name_len);
             hs->pos = idx->offset + sizeof(struct needle) + idx->name_len + idx->size;
 
-            mem_idx = NULL;
-            den = NULL;
+            GF_REF_PUT(den);
+            GF_REF_PUT(mem_idx);
         }
 
         if (left > 0 && left <= shift+size && left+sizeof(*idx) > shift+size) {
@@ -568,10 +579,12 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
 err:
     if (fd >= 0)
         sys_close(fd);
+
+    if (den)
+        GF_REF_PUT(den);        
     if (mem_idx)
         GF_REF_PUT(mem_idx);
-    if (den)
-        GF_REF_PUT(den);
+
     mem_idx_map_clear(hs);
     dentry_map_clear(hs); 
 
@@ -603,10 +616,10 @@ hs_build(xlator_t *this, struct hs *parent, struct hs *hs) {
     if (ret != 0)
         goto err;
 
-    den = dentry_from_hs(".", hs);
+    den = dentry_init(hs->gfid, DIR_T, NULL);
     if (!den) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_INIT_FAILED,
-            "Fail to init dentry (%s/%s %s).", hs->path, ".", uuid_utoa(hs->gfid));
+            "Failed to init dentry (%s/%s %s).", hs->path, ".", uuid_utoa(hs->gfid));
         ret = -1;
         goto err;
     }
@@ -617,20 +630,24 @@ hs_build(xlator_t *this, struct hs *parent, struct hs *hs) {
             "Update dentry (%s/%s %s).", hs->path, ".", uuid_utoa(hs->gfid));                
     } else if (ret == -1) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_ADD_FAILED,
-            "Fail to add dentry (%s/%s %s).", hs->path, ".", uuid_utoa(hs->gfid));
+            "Failed to add dentry (%s/%s %s).", hs->path, ".", uuid_utoa(hs->gfid));
         goto err;
     }
 
     if (!parent) {
-        if (!__is_root_gfid(hs->gfid))
+        if (!__is_root_gfid(hs->gfid)) {
+            gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_DANGLING,
+                "Dangling path %s.", hs->path);
+            ret = -1;
             goto err;
+        }
         return 0;
     }
 
-    den = dentry_from_hs("..", parent);
+    den = dentry_init(parent->gfid, DIR_T, NULL);
     if (!den) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_INIT_FAILED,
-            "Fail to init dentry (%s/%s %s).", parent->path, "..", uuid_utoa(parent->gfid));
+            "Failed to init dentry (%s/%s %s).", parent->path, "..", uuid_utoa(parent->gfid));
         ret = -1;
         goto err;
     }
@@ -641,7 +658,7 @@ hs_build(xlator_t *this, struct hs *parent, struct hs *hs) {
             "Update dentry (%s/%s %s).", parent->path, "..", uuid_utoa(parent->gfid));                
     } else if (ret == -1) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_ADD_FAILED,
-            "Fail to add dentry (%s/%s %s).", parent->path, "..", uuid_utoa(parent->gfid));
+            "Failed to add dentry (%s/%s %s).", parent->path, "..", uuid_utoa(parent->gfid));
         goto err;
     }    
 
@@ -671,6 +688,9 @@ hs_release(void *to_free) {
     if (!hs)
         return;
 
+    /*
+    * dentry map should be destroied before mem_idx map.
+    */
     dentry_map_destroy(hs);
     mem_idx_map_destroy(hs);
 
@@ -683,6 +703,7 @@ hs_release(void *to_free) {
             list_del(&hs->me);
         }
         pthread_rwlock_unlock(&hs->parent->lock);
+        GF_REF_PUT(hs->parent);
     }
 
     list_for_each_entry_safe(child, tmp, &hs->children, me) {
@@ -713,7 +734,7 @@ hs_init(xlator_t *this, struct hs *parent, const char *path) {
     hs = (void *)GF_CALLOC(1, sizeof(*hs), gf_hs_mt_hs);
     if (!hs) {
         gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
-            "Fail to alloc haystack: %s.", path);
+            "Failed to alloc haystack: %s.", path);
         goto err;
     }
 
@@ -727,14 +748,14 @@ hs_init(xlator_t *this, struct hs *parent, const char *path) {
     mem_idx_map_init(hs);
     if (!hs->map) {
         gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_MEM_IDX_MAP_INIT_FAILED,
-            "Fail to alloc mem idx map: %s.", path);
+            "Failed to alloc mem idx map: %s.", path);
         goto err;        
     }
 
     dentry_map_init(hs);
     if (!hs->lookup) {
         gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_DENTRY_MAP_INIT_FAILED,
-            "Fail to alloc lookup table: %s.", path);
+            "Failed to alloc lookup table: %s.", path);
         goto err;
     }
 
@@ -745,12 +766,12 @@ hs_init(xlator_t *this, struct hs *parent, const char *path) {
     ret = hs_build(this, parent, hs);
     if (ret < 0) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_BUILD_FAILED,
-            "Fail to build haystack: %s.", path);
+            "Failed to build haystack: %s.", path);
         goto err;
     }
 
     if (parent) {
-        hs->parent = parent;
+        hs->parent = GF_REF_GET(parent);
         pthread_rwlock_wrlock(&hs->parent->lock);
         {
             list_add(&hs->me, &hs->parent->children);
@@ -763,19 +784,20 @@ hs_init(xlator_t *this, struct hs *parent, const char *path) {
 
 err:
     if (hs) {        
+        dentry_map_destroy(hs);
+        mem_idx_map_destroy(hs);
+
         if (hs->parent) {
             pthread_rwlock_wrlock(&hs->parent->lock);
             {
                 list_del(&hs->me);
             }
             pthread_rwlock_unlock(&hs->parent->lock);
+            GF_REF_PUT(hs->parent);
         }
-
-        if (hs->path)
-            GF_FREE(hs->path);
+            
         pthread_rwlock_destroy(&hs->lock);
-        dentry_map_destroy(hs);
-        mem_idx_map_destroy(hs);
+        GF_FREE(hs->path);        
         GF_FREE(hs);
     }
     return NULL;
@@ -797,7 +819,7 @@ hs_setup(xlator_t *this, struct hs_ctx *ctx, struct hs *parent, const char *path
     hs = hs_init(this, parent, path);
     if (!hs) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_INIT_FAILED, 
-            "Fail to init haystack: %s.", path);         
+            "Failed to init haystack: %s.", path);         
         goto err;
     }
 
@@ -805,7 +827,7 @@ hs_setup(xlator_t *this, struct hs_ctx *ctx, struct hs *parent, const char *path
     dir = sys_opendir(real_path);
     if (!dir) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_DIR_OPERATION_FAILED, 
-            "Fail to open directory: %s", path);     
+            "Failed to open directory: %s", path);     
         goto err;
     }
 
@@ -820,19 +842,19 @@ hs_setup(xlator_t *this, struct hs_ctx *ctx, struct hs *parent, const char *path
         ret = sys_lstat(real_path, &stbuf);
         if (ret < 0) {
             gf_msg(this->name, GF_LOG_WARNING, errno, H_MSG_LSTAT_FAILED,
-                "Fail to lstat: %s", child_path);
+                "Failed to lstat: %s", child_path);
         } else if (S_ISDIR(stbuf.st_mode)) {
             child = hs_setup(this, ctx, hs, child_path);
             if (!child) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_SCAN_FAILED,
-                    "Fail to setup child haystack: %s.", child_path);
+                    "Failed to setup child haystack: %s.", child_path);
                 goto err;
             }
 
-            den = dentry_from_dir(child_path, child->gfid);
+            den = dentry_init(child->gfid, DIR_T, NULL);
             if (!den) {
                 gf_msg(THIS->name, GF_LOG_ERROR, ENOMEM, H_MSG_DENTRY_INIT_FAILED,
-                    "Fail to alloc dentry for directory (%s %s).", child_path, uuid_utoa(child->gfid)); 
+                    "Failed to alloc dentry for directory (%s %s).", child_path, uuid_utoa(child->gfid)); 
                 goto err;
             }
 
@@ -843,11 +865,14 @@ hs_setup(xlator_t *this, struct hs_ctx *ctx, struct hs *parent, const char *path
                 goto err;
             } else if (ret == -1) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_ADD_FAILED,
-                    "Fail to add dentry into lookup table: (%s %s).", path, entry->d_name);
+                    "Failed to add dentry into lookup table: (%s %s).", path, entry->d_name);
                 goto err;
             }
 
-            den = NULL;
+            /*
+            * There is one more ref after setup.
+            */
+            GF_REF_PUT(child);
         }
     }
 
@@ -858,7 +883,7 @@ hs_setup(xlator_t *this, struct hs_ctx *ctx, struct hs *parent, const char *path
         goto err;
     } else if (ret == -1) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_ADD_FAILED,
-            "Fail to add hs into ctx: (%s %s).", path, uuid_utoa(hs->gfid));
+            "Failed to add hs into ctx: (%s %s).", path, uuid_utoa(hs->gfid));
         goto err;
     }
 
@@ -869,10 +894,12 @@ hs_setup(xlator_t *this, struct hs_ctx *ctx, struct hs *parent, const char *path
 err:
     if (dir) 
         sys_closedir(dir);
-    if (hs) 
-        GF_REF_PUT(hs);
     if (den)
         GF_REF_PUT(den);
+    if (child)
+        GF_REF_PUT(child);
+    if (hs) 
+        GF_REF_PUT(hs);
 
     return NULL;
 }
@@ -893,21 +920,21 @@ hs_ctx_init(xlator_t *this) {
     ctx = (void *)GF_CALLOC(1, sizeof(struct hs_ctx), gf_hs_mt_hs_ctx);
     if (!ctx) {
         gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
-            "Fail to alloc haystack context.");
+            "Failed to alloc haystack context.");
         goto err;
     }
 
     hs_map_init(ctx);
     if (!ctx->map) {
         gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_HS_CTX_INIT_FAILED,
-            "Fail to init haystack context map.");        
+            "Failed to init haystack context map.");        
         goto err;
     }
 
     ctx->root = hs_setup(this, ctx, NULL, "/");
     if (!ctx->root) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_SCAN_FAILED,
-            "Fail to setup haystack: /.");  
+            "Failed to setup haystack: /.");  
         goto err;
     }
 

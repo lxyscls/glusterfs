@@ -7,6 +7,7 @@
 #include <glusterfs/mem-pool.h>
 #include <glusterfs/refcount.h>
 #include <glusterfs/locking.h>
+#include <glusterfs/compat-uuid.h>
 
 #include "hs.h"
 #include "hs-mem-types.h"
@@ -85,11 +86,11 @@ hs_map_put(struct hs_ctx *ctx, uuid_t gfid, struct hs *vvar) {
                 break;
             case 0:
                 GF_REF_PUT(kh_val(ctx->map, k));
-                kh_val(ctx->map, k) = vvar;
+                kh_val(ctx->map, k) = GF_REF_GET(vvar);
                 break;
             default:
                 kh_key(ctx->map, k) = gf_strdup(uuid_utoa(gfid));
-                kh_val(ctx->map, k) = vvar;
+                kh_val(ctx->map, k) = GF_REF_GET(vvar);
                 break;
         }
     }
@@ -129,48 +130,30 @@ mem_idx_release(void *to_free) {
     GF_FREE(mem_idx);
 }
 
-static inline struct mem_idx *
-mem_idx_from_needle(struct needle *needle, uint64_t offset) {
-    struct mem_idx *mem_idx = NULL;
-
-    mem_idx = GF_CALLOC(1, sizeof(*mem_idx)+needle->name_len, gf_hs_mt_mem_idx);
-    if (!mem_idx)      
-        goto out;
-
-    GF_REF_INIT(mem_idx, mem_idx_release);
-    mem_idx->name_len = needle->name_len;
-    mem_idx->size = needle->size;
-    mem_idx->offset = offset;
-    gf_strncpy(mem_idx->name, needle->data, needle->name_len);
-
-out:
-    return mem_idx;
-}
-
-static inline struct mem_idx *
-mem_idx_from_idx(struct idx *idx) {
-    struct mem_idx *mem_idx = NULL;
-
-    mem_idx = GF_CALLOC(1, sizeof(*mem_idx)+idx->name_len, gf_hs_mt_mem_idx);
-    if (!mem_idx)
-        goto out;
-
-    GF_REF_INIT(mem_idx, mem_idx_release);
-    mem_idx->name_len = idx->name_len;
-    mem_idx->size = idx->size;
-    mem_idx->offset = idx->offset;
-    gf_strncpy(mem_idx->name, idx->name, idx->name_len);
-
-out:
-    return mem_idx;
-}
-
 static inline void
 mem_idx_purge(const char *k, struct mem_idx *v) {
     if (k)
         GF_FREE((void *)k);
     if (v)
         GF_REF_PUT(v);
+}
+
+static inline struct mem_idx *
+mem_idx_init(const char *name, uint8_t name_len, uint32_t size, uint64_t offset) {
+    struct mem_idx *mem_idx = NULL;
+
+    mem_idx = GF_CALLOC(1, sizeof(*mem_idx)+name_len, gf_hs_mt_mem_idx);
+    if (!mem_idx)
+        goto out;
+
+    GF_REF_INIT(mem_idx, mem_idx_release);
+    mem_idx->name_len = name_len;
+    mem_idx->size = size;
+    mem_idx->offset = offset;
+    gf_strncpy(mem_idx->name, name, name_len);
+
+out:
+    return mem_idx;    
 }
 
 static inline void
@@ -238,11 +221,11 @@ mem_idx_map_put(struct hs *hs, uuid_t gfid, struct mem_idx *vvar) {
                 break;
             case 0:
                 GF_REF_PUT(kh_val(hs->map, k));
-                kh_val(hs->map, k) = vvar;
+                kh_val(hs->map, k) = GF_REF_GET(vvar);
                 break;
             default:
                 kh_key(hs->map, k) = gf_strdup(uuid_utoa(gfid));
-                kh_val(hs->map, k) = vvar;
+                kh_val(hs->map, k) = GF_REF_GET(vvar);
                 break;
         }
     }
@@ -259,7 +242,7 @@ mem_idx_map_put(struct hs *hs, uuid_t gfid, struct mem_idx *vvar) {
         for (; __i < kh_end(h); ++__i) {            \
 		    if (!kh_exist(h,__i)) continue;         \
 		    (kvar) = kh_key(h,__i);                 \
-		    (vvar) = kh_val(h,__i);                 \
+		    (vvar) = GF_REF_GET(kh_val(h,__i));     \
             break;                                  \
         }                                           \
         next = ++__i;                               \
@@ -277,88 +260,30 @@ dentry_release(void *to_free) {
     GF_FREE(den);
 }
 
-static inline struct dentry *
-dentry_from_needle(struct needle *needle, struct mem_idx *mem_idx) {
-    struct dentry *den = NULL;
-
-    den = GF_CALLOC(1, sizeof(*den), gf_hs_mt_dentry);
-    if (!den)
-        goto out;
-
-    GF_REF_INIT(den, dentry_release);
-    gf_uuid_copy(den->gfid, needle->gfid);
-    if (needle->flags & F_DELETED)
-        den->type = NON_T;
-    else
-        den->type = REG_T;
-    GF_REF_GET(mem_idx);
-    den->mem_idx = mem_idx;
-
-out:
-    return den;    
-}
-
-static inline struct dentry *
-dentry_from_idx(struct idx *idx, struct mem_idx *mem_idx) {
-    struct dentry *den = NULL;
-
-    den = GF_CALLOC(1, sizeof(*den), gf_hs_mt_dentry);
-    if (!den)
-        goto out;
-
-    GF_REF_INIT(den, dentry_release);
-    gf_uuid_copy(den->gfid, idx->gfid);
-    if (idx->offset > 0)
-        den->type = REG_T;
-    else
-        den->type = NON_T;
-    GF_REF_GET(mem_idx);
-    den->mem_idx = mem_idx;
-
-out:
-    return den;
-}
-
-static inline struct dentry *
-dentry_from_dir(const char *path, uuid_t gfid) {
-    struct dentry *den = NULL;
-
-    den = GF_CALLOC(1, sizeof(*den), gf_hs_mt_dentry);
-    if (!den)
-        goto out;
-
-    GF_REF_INIT(den, dentry_release);
-    gf_uuid_copy(den->gfid, gfid);
-    den->type = DIR_T;
-    den->mem_idx = NULL;
-
-out:
-    return den;  
-}
-
-static inline struct dentry *
-dentry_from_hs(const char *path, struct hs *hs) {
-    struct dentry *den = NULL;
-
-    den = GF_CALLOC(1, sizeof(*den), gf_hs_mt_dentry);
-    if (!den)
-        goto out;
-
-    GF_REF_INIT(den, dentry_release);
-    gf_uuid_copy(den->gfid, hs->gfid);
-    den->type = DIR_T;
-    den->mem_idx = NULL;
-
-out:
-    return den;  
-}
-
 static inline void
 dentry_purge(const char *k, struct dentry *v) {
     if (k)
         GF_FREE((void *)k);
     if (v)
         GF_REF_PUT(v);
+}
+
+static inline struct dentry *
+dentry_init(uuid_t gfid, uint8_t type, struct mem_idx *mem_idx) {
+    struct dentry *den = NULL;
+
+    den = GF_CALLOC(1, sizeof(*den), gf_hs_mt_dentry);
+    if (!den)
+        goto out;
+    
+    GF_REF_INIT(den, dentry_release);
+    gf_uuid_copy(den->gfid, gfid);
+    den->type = type;
+    if (mem_idx)
+        den->mem_idx = GF_REF_GET(mem_idx);
+
+out:
+    return den;
 }
 
 static inline void
@@ -426,11 +351,11 @@ dentry_map_put(struct hs *hs, const char *name, struct dentry *vvar) {
                 break;
             case 0:
                 GF_REF_PUT(kh_val(hs->lookup, k));
-                kh_val(hs->lookup, k) = vvar;
+                kh_val(hs->lookup, k) = GF_REF_GET(vvar);
                 break;
             default:
                 kh_key(hs->lookup, k) = gf_strdup(name);
-                kh_val(hs->lookup, k) = vvar;
+                kh_val(hs->lookup, k) = GF_REF_GET(vvar);
                 break;
         }
     }
@@ -463,8 +388,10 @@ lookup_t_init(struct hs *hs, struct mem_idx *mem_idx, int8_t type) {
         goto out;
 
     lk->type = type;
-    lk->hs = hs;
-    lk->mem_idx = mem_idx;
+    if (hs)
+        lk->hs = GF_REF_GET(hs);
+    if (mem_idx)
+        lk->mem_idx = GF_REF_GET(mem_idx);
 
 out:
     return lk;

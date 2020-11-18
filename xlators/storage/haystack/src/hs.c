@@ -56,7 +56,7 @@ haystack_init(xlator_t *this) {
     private = GF_CALLOC(1, sizeof(*private), gf_hs_mt_hs_private);
     if (!private) {
         gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
-            "Fail to alloc haystack private.");
+            "Failed to alloc haystack private.");
         ret = -1;
         goto out;
     }
@@ -94,7 +94,7 @@ haystack_init(xlator_t *this) {
         goto out;
     } else if ((size == -1) && (errno != ENODATA) && (errno != ENOATTR)) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_GFID_OPERATION_FAILED, 
-            "Fail to fetch gfid: %s.", private->base_path);
+            "Failed to fetch gfid: %s.", private->base_path);
         ret = -1;
         goto out;
     } else {
@@ -102,7 +102,7 @@ haystack_init(xlator_t *this) {
                              XATTR_CREATE);
         if (ret == -1) {
             gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_GFID_OPERATION_FAILED, 
-                "Fail to set gfid: %s.", private->base_path);
+                "Failed to set gfid: %s.", private->base_path);
             goto out;
         }
     }

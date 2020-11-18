@@ -18,6 +18,7 @@
 
 #include "hs.h"
 #include "hs-ctx.h"
+#include "hs-helpers.h"
 #include "hs-messages.h"
 #include "hs-mem-types.h"
 
@@ -62,7 +63,7 @@ hs_opendir(call_frame_t *frame, xlator_t *this, loc_t *loc, fd_t *fd, dict_t *xd
     hfd = GF_CALLOC(1, sizeof(*hfd), gf_hs_mt_hs_fd);
     if (!hfd) {
         gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_HFD_INIT_FAILED,
-            "Fail to alloc hfd: %s.", loc->path);
+            "Failed to alloc hfd: %s.", loc->path);
         op_ret = -1;
         op_errno = EINVAL;
         goto out;
@@ -73,32 +74,37 @@ hs_opendir(call_frame_t *frame, xlator_t *this, loc_t *loc, fd_t *fd, dict_t *xd
     if (!dir) {
         op_errno = errno;
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_OPENDIR_FAILED,
-            "Fail to open directory: %s.", real_path);
+            "Failed to open directory: %s.", real_path);
         op_ret = -1;
         goto out;
     }
 
-    hfd->hs = hs;
+    hfd->hs = GF_REF_GET(hs);
     hfd->dir = dir;
     hfd->dir_eof = -1;
 
     op_ret = fd_ctx_set(fd, this, (uint64_t)(long)hfd);
     if (op_ret)
         gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_HFD_ADD_FAILED,
-            "Fail to set hfd into ctx: %s.", loc->path);
+            "Failed to set hfd into ctx: %s.", loc->path);
 
     op_ret = 0;
 out:
+    if (hs)
+        GF_REF_PUT(hs);
+
     if (op_ret) {
-        if (hs)
-            GF_REF_PUT(hs);
         if (dir)
             sys_closedir(dir);
-        if (hfd)
+        if (hfd) {
+            if (hfd->hs)
+                GF_REF_PUT(hfd->hs);
             GF_FREE(hfd);
+        }
     }
 
     STACK_UNWIND_STRICT(opendir, frame, op_ret, op_errno, fd, NULL);
+
     return 0;
 }
 
@@ -135,6 +141,7 @@ out:
             sys_closedir(hfd->dir);
         GF_FREE(hfd);
     }
+
     return 0;
 }
 
@@ -269,8 +276,10 @@ log_read:
                 break;
             
             this_size = max(sizeof(gf_dirent_t), sizeof(gfs3_dirplist)) + mem_idx->name_len;
-            if (this_size + filled > size)
+            if (this_size + filled > size) {
+                GF_REF_PUT(mem_idx);
                 break;
+            }
             
             this_entry = gf_dirent_for_name(mem_idx->name);
             if (!this_entry) {
@@ -278,6 +287,7 @@ log_read:
                     "Could not create gf_dirent for entry %s.", mem_idx->name);
                 op_ret = -1;
                 op_errno = EBADF;
+                GF_REF_PUT(mem_idx);
                 pthread_rwlock_unlock(&hs->map_lock);            
                 goto out;
             }
@@ -288,6 +298,8 @@ log_read:
             this_entry->d_type = DT_REG;
 
             list_add_tail(&this_entry->list, &entries.list);
+
+            GF_REF_PUT(mem_idx);
 
             filled += this_size;
             count++;             
@@ -329,16 +341,11 @@ hs_stat(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t *xdata) {
     int32_t op_ret = -1;
     int32_t op_errno = 0;
 
-    struct hs_private *priv = NULL;
-    struct hs_ctx *ctx = NULL;
     lookup_t *lk = NULL;
 
     VALIDATE_OR_GOTO(frame, out);
     VALIDATE_OR_GOTO(this, out);
     VALIDATE_OR_GOTO(loc, out);
-
-    priv = this->private;
-    ctx = priv->ctx;
 
     if (gf_uuid_is_null(loc->gfid)) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_INODE_HANDLE_CREATE,
