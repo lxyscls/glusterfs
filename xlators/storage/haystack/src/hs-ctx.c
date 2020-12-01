@@ -421,7 +421,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
     
     return 0;
 err:
-    if (fd > 0)
+    if (fd >= 0)
         sys_close(fd);
     sys_close(hs->idx_fd);
     hs->idx_fd = -1;        
@@ -472,8 +472,7 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
     size = sys_pread(fd, &super, sizeof(super), offset);
     if (size != sizeof(super) || super.version != HSVERSION || gf_uuid_compare(super.gfid, hs->gfid)) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_BROKEN_FILE,
-            "Broken super in idx file: %s.", hs->path);          
-        sys_close(fd);
+            "Broken super in idx file: %s.", hs->path);
         ret = -1;
         goto err;
     }
@@ -592,6 +591,127 @@ err:
 }
 
 static int
+hs_scratch(xlator_t *this, struct hs *parent, struct hs *hs) {
+    int ret = -1;
+    char *log_path = NULL;
+    char *idx_path = NULL;
+    int log_fd = -1;
+    int idx_fd = -1;
+    ssize_t size = -1;
+    struct super super = {0};
+    struct dentry *den = NULL;
+
+    super.version = HSVERSION;
+    gf_uuid_copy(super.gfid, hs->gfid);
+
+    MAKE_LOG_PATH(log_path, this, hs->path);
+    log_fd = sys_open(log_path, COFLAG, MODE);
+    if (log_fd == -1) {
+        gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_CREATE_FAILED,
+            "Failed to create log file: %s.", hs->path);
+        ret = -1;
+        goto err;
+    }
+
+    size = sys_pwrite(log_fd, &super, sizeof(super), 0);
+    if (size != sizeof(super)) {
+        gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_WRITE_FAILED,
+            "Failed to write super into log file: %s.", hs->path);
+        ret = -1;
+        goto err;
+    }  
+    
+    MAKE_IDX_PATH(idx_path, this, hs->path);
+    idx_fd = sys_open(idx_path, COFLAG, MODE);
+    if (idx_fd == -1) {
+        gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_CREATE_FAILED,
+            "Failed to create idx file: %s.", hs->path);
+        ret = -1;
+        goto err;
+    }
+
+    size = sys_pwrite(idx_fd, &super, sizeof(super), 0);
+    if (size != sizeof(super)) {
+        gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_WRITE_FAILED,
+            "Failed to write super into idx file: %s.", hs->path);
+        ret = -1;
+        goto err;
+    }
+
+    den = dentry_init(hs->gfid, DIR_T, NULL);
+    if (!den) {
+        gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_INIT_FAILED,
+            "Failed to init dentry (%s/%s %s).", hs->path, ".", uuid_utoa(hs->gfid));
+        ret = -1;
+        goto err;
+    }
+
+    ret = dentry_map_put(hs, ".", den);
+    if (ret == 0) {
+        gf_msg(this->name, GF_LOG_INFO, 0, H_MSG_DENTRY_UPDATE,
+            "Update dentry (%s/%s %s).", hs->path, ".", uuid_utoa(hs->gfid));                
+    } else if (ret == -1) {
+        gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_ADD_FAILED,
+            "Failed to add dentry (%s/%s %s).", hs->path, ".", uuid_utoa(hs->gfid));
+        goto err;
+    }
+
+    if (!parent) {
+        if (!__is_root_gfid(hs->gfid)) {
+            gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_DANGLING,
+                "Dangling path %s.", hs->path);
+            ret = -1;
+            goto err;
+        }
+
+        hs->log_fd = log_fd;
+        hs->idx_fd = idx_fd;
+        hs->pos = sizeof(super);
+
+        return 0;
+    }
+
+    den = dentry_init(parent->gfid, DIR_T, NULL);
+    if (!den) {
+        gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_INIT_FAILED,
+            "Failed to init dentry (%s/%s %s).", parent->path, "..", uuid_utoa(parent->gfid));
+        ret = -1;
+        goto err;
+    }
+
+    ret = dentry_map_put(hs, "..", den);
+    if (ret == 0) {
+        gf_msg(this->name, GF_LOG_INFO, 0, H_MSG_DENTRY_UPDATE,
+            "Update dentry (%s/%s %s).", parent->path, "..", uuid_utoa(parent->gfid));                
+    } else if (ret == -1) {
+        gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_ADD_FAILED,
+            "Failed to add dentry (%s/%s %s).", parent->path, "..", uuid_utoa(parent->gfid));
+        goto err;
+    }
+
+    hs->log_fd = log_fd;
+    hs->idx_fd = idx_fd;
+    hs->pos = sizeof(super);
+
+    return 0;
+
+err:
+    if (log_fd >= 0) {
+        sys_close(log_fd);
+        if (log_path)
+            sys_unlink(log_path);
+    }
+
+    if (idx_fd >= 0) {
+        sys_close(idx_fd);
+        if (idx_path)
+            sys_unlink(idx_path);
+    }
+    return ret;
+
+}
+
+static int
 hs_build(xlator_t *this, struct hs *parent, struct hs *hs) {
     int ret = -1;
     struct stat stbuf = {0};
@@ -682,8 +802,6 @@ hs_dump(khash_t(hs) *map, const char *k, struct hs *v) {
 static void 
 hs_release(void *to_free) {
     struct hs *hs = (struct hs *)to_free;
-    struct hs *child = NULL;
-    struct hs *tmp = NULL;
 
     if (!hs)
         return;
@@ -706,17 +824,13 @@ hs_release(void *to_free) {
         GF_REF_PUT(hs->parent);
     }
 
-    list_for_each_entry_safe(child, tmp, &hs->children, me) {
-        GF_REF_PUT(child);
-    }
-
     pthread_rwlock_destroy(&hs->lock);
     GF_FREE(hs->path);
     GF_FREE(hs);
 }
 
 struct hs *
-hs_init(xlator_t *this, struct hs *parent, const char *path) {
+hs_init(xlator_t *this, struct hs *parent, const char *path, gf_boolean_t scratch) {
     ssize_t size = -1;
     int ret = -1;
     uuid_t gfid = {0}; 
@@ -763,11 +877,20 @@ hs_init(xlator_t *this, struct hs *parent, const char *path) {
     hs->idx_fd = -1;
     hs->pos = 0;
 
-    ret = hs_build(this, parent, hs);
-    if (ret < 0) {
-        gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_BUILD_FAILED,
-            "Failed to build haystack: %s.", path);
-        goto err;
+    if (scratch) {
+        ret = hs_scratch(this, parent, hs);
+        if (ret < 0) {
+            gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_BUILD_FAILED,
+                "Failed to build haystack: %s.", path);
+            goto err;            
+        }
+    } else {
+        ret = hs_build(this, parent, hs);
+        if (ret < 0) {
+            gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_BUILD_FAILED,
+                "Failed to build haystack: %s.", path);
+            goto err;
+        }
     }
 
     if (parent) {
@@ -805,18 +928,19 @@ err:
 
 static struct hs *
 hs_setup(xlator_t *this, struct hs_ctx *ctx, struct hs *parent, const char *path) {
+    int ret = -1;
     struct hs *hs = NULL;
     struct hs *child = NULL;
+    struct hs *tmp = NULL;
     DIR *dir = NULL;
     char *real_path = NULL;
     char *child_path = NULL;    
     struct dirent *entry = NULL;
     struct dirent scratch[2] = {{0}};
     struct stat stbuf = {0};
-    int ret = -1;
     struct dentry *den = NULL;
 
-    hs = hs_init(this, parent, path);
+    hs = hs_init(this, parent, path, _gf_false);
     if (!hs) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_INIT_FAILED, 
             "Failed to init haystack: %s.", path);         
@@ -860,27 +984,23 @@ hs_setup(xlator_t *this, struct hs_ctx *ctx, struct hs *parent, const char *path
 
             ret = dentry_map_put(hs, entry->d_name, den);
             if (ret == 0) {
-                gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_DUP,
+                gf_msg(this->name, GF_LOG_INFO, 0, H_MSG_DENTRY_DUP,
                     "Duplicate sub directory: %s.", entry->d_name);
-                goto err;
             } else if (ret == -1) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_ADD_FAILED,
                     "Failed to add dentry into lookup table: (%s %s).", path, entry->d_name);
                 goto err;
             }
 
-            /*
-            * There is one more ref after setup.
-            */
+            GF_REF_PUT(den);
             GF_REF_PUT(child);
         }
     }
 
     ret = hs_map_put(ctx, hs->gfid, hs);
     if (ret == 0) {
-        gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_DUP,
+        gf_msg(this->name, GF_LOG_INFO, 0, H_MSG_HS_DUP,
             "Duplicate directory: (%s %s).", path, uuid_utoa(hs->gfid));
-        goto err;
     } else if (ret == -1) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_ADD_FAILED,
             "Failed to add hs into ctx: (%s %s).", path, uuid_utoa(hs->gfid));
@@ -896,10 +1016,12 @@ err:
         sys_closedir(dir);
     if (den)
         GF_REF_PUT(den);
-    if (child)
-        GF_REF_PUT(child);
-    if (hs) 
+    if (hs) {
+        list_for_each_entry_safe(child, tmp, &hs->children, me) {
+            GF_REF_PUT(child);
+        }
         GF_REF_PUT(hs);
+    }
 
     return NULL;
 }

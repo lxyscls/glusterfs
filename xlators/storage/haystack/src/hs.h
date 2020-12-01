@@ -133,6 +133,8 @@ struct hs_private {
 int32_t 
 hs_lookup(call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t * xdata);
 
+int32_t 
+hs_mkdir(call_frame_t *frame, xlator_t *this, loc_t *loc, mode_t mode, mode_t umask, dict_t *xdata);
 int32_t
 hs_opendir(call_frame_t *frame, xlator_t *this, loc_t *loc, fd_t *fd, dict_t *xdata);
 int32_t

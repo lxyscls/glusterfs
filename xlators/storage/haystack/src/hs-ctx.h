@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <uuid/uuid.h>
 
+#include <glusterfs/glusterfs.h>
 #include <glusterfs/mem-pool.h>
 #include <glusterfs/refcount.h>
 #include <glusterfs/locking.h>
@@ -400,6 +401,6 @@ out:
 struct hs_ctx *hs_ctx_init(xlator_t *this);
 void hs_ctx_free(struct hs_ctx *ctx);
 void hs_dump(khash_t(hs) *map, const char *k, struct hs *v);
-struct hs *hs_init(xlator_t *this, struct hs *parent, const char *rpath);    
+struct hs *hs_init(xlator_t *this, struct hs *parent, const char *rpath, gf_boolean_t scratch);    
 
 #endif
