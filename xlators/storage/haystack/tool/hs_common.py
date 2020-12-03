@@ -43,7 +43,6 @@ SUPER_FMT = "=B16sH"
 '''
 struct needle {
     uuid_t gfid;
-    struct iatt buf;
     uint8_t flags;
     uint32_t crc;
     uint8_t name_len;
@@ -51,21 +50,18 @@ struct needle {
     char data[0]; /* name + data */
 } __attribute__ ((packed));
 '''
-NEEDLE_FMT_1 = "=16s"
-NEEDLE_FMT_2 = "=BIBI"
+NEEDLE_FMT = "=16sBIBI"
 
 '''
 struct idx {
     uuid_t gfid;
-    struct iatt buf;
     uint8_t name_len;
     uint32_t size;
     uint64_t offset;
     char name[0];
 } __attribute__ ((packed));
 '''
-IDX_FMT_1 = "=16s"
-IDX_FMT_2 = "=BIQ"
+IDX_FMT = "=16sBIQ"
 
 HSVERSION = 1
 ROOTGFID = uuid.UUID("00000000-0000-0000-0000-000000000001")

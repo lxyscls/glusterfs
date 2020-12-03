@@ -15,25 +15,21 @@ LEVELS = 3
 DIRS = 3
 FILES = 100
 
-def gen_needle(gfid, iatt):
+def gen_needle(gfid):
     buf = ''
     for _ in range(1024):
         buf = buf + struct.pack('B', random.randrange(0, 255))
-    
+
     crc = zlib.crc32(buf) & 0xffffffff
 
-    ret = struct.pack(NEEDLE_FMT_1, gfid.bytes)
-    # ret = ret + iatt
-    ret = ret + struct.pack(NEEDLE_FMT_2, 0, crc, len(gfid.hex)+1, 1024)
+    ret = struct.pack(NEEDLE_FMT, gfid.bytes, 0, crc, len(gfid.hex)+1, 1024)
     ret = ret + struct.pack('32sc', gfid.hex, '\0')
     ret = ret + buf
 
     return ret
 
-def gen_idx(gfid, iatt, offset):
-    ret = struct.pack(IDX_FMT_1, gfid.bytes)
-    # ret = ret + iatt
-    ret = ret + struct.pack(IDX_FMT_2, len(gfid.hex)+1, 1024, offset)
+def gen_idx(gfid, offset):
+    ret = struct.pack(IDX_FMT, gfid.bytes, len(gfid.hex)+1, 1024, offset)
     ret = ret + struct.pack('32sc', gfid.hex, '\0')
 
     return ret
@@ -58,10 +54,9 @@ def fill_files(parpath, gfid):
 
     for i in range(FILES):
         id = uuid.uuid4()
-        iatt = gen_iatt(id)
 
-        needle = gen_needle(id, iatt)        
-        idx = gen_idx(id, iatt, offset)        
+        needle = gen_needle(id)        
+        idx = gen_idx(id, offset)        
         
         log_fd.write(needle)
 
