@@ -18,7 +18,10 @@
 #include "khash.h"
 
 #define HSVERSION 1
+
+/* For needle's flag, idx's offset, mem_idx's offset */
 #define F_DELETED (1<<0)
+#define F_CREATED (1<<1)
 
 #define NON_T (1<<0)
 #define DIR_T (1<<1)
@@ -80,7 +83,7 @@ struct mem_idx {
 
     uint8_t name_len;
     uint32_t size;
-    uint64_t offset; // 0: DELETED, 1: CREATED
+    uint64_t offset;
     char name[0];
 };
 

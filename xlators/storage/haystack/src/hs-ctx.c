@@ -31,12 +31,15 @@
 #include "hs-mem-types.h"
 #include "hs-messages.h"
 
-#define COFLAG (O_RDWR | O_CREAT | O_APPEND)
-#define OFLAG (O_RDWR | O_APPEND)
-#define MODE (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
-#define BUFF_SIZE (128*1024)
+#define OFLAG1 (O_RDWR | O_APPEND)
+#define OFLAG2 (O_RDWR | O_DSYNC | O_APPEND)
 
-static __thread char build_buf[BUFF_SIZE] = {0};
+#define CFLAG1 (O_CREAT | O_RDWR | O_APPEND)
+#define CFLAG2 (O_CREAT | O_RDWR | O_DSYNC | O_APPEND)
+
+#define MODE (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
+
+#define BUFF_SIZE (max(sizeof(struct idx), sizeof(struct needle)) + NAME_MAX + 1)
 
 void
 mem_idx_dump(khash_t(mem_idx) *map, const char *k, struct mem_idx *v) {
@@ -45,34 +48,29 @@ mem_idx_dump(khash_t(mem_idx) *map, const char *k, struct mem_idx *v) {
     }
 }
 
-int
+static int
 hs_slow_build(xlator_t *this, struct hs *hs) {
     int ret = -1;
-    char *log_path = NULL;
+    int op_ret = -1;
+    ssize_t size = 0;
+    ssize_t wsize = 0;
     char *idx_path = NULL;
-    int log_fd = -1;
+    char *log_path = NULL;
     int idx_fd = -1;
+    int log_fd = -1;
     struct stat stbuf = {0};
     struct super super = {0};
-    ssize_t size = -1;
-    uint64_t offset = 0;
     struct needle *needle = NULL;
-    struct mem_idx *mem_idx = NULL;
     struct idx *idx = NULL;
+    struct mem_idx *mem_idx = NULL;
     struct dentry *den = NULL;
-    uint64_t left = 0;
-    uint64_t shift = 0;
-    ssize_t wsize = -1;
-    struct hs_private *priv = NULL;
-    uint32_t crc = 0;
-
-    priv = this->private;
+    char buff[BUFF_SIZE] = {0};
 
     MAKE_LOG_PATH(log_path, this, hs->path);
     MAKE_IDX_PATH(idx_path, this, hs->path);
 
-    ret = sys_stat(idx_path, &stbuf);
-    if (!ret) {
+    op_ret = sys_stat(idx_path, &stbuf);
+    if (!op_ret) {
         if (S_ISREG(stbuf.st_mode)) {
             sys_unlink(idx_path);
         } else {
@@ -80,26 +78,26 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
                 "Idx file is not a regular file: %s.", hs->path);
             ret = -1;
             goto err;
-        }
+        }        
     }
 
-    log_fd = sys_open(log_path, OFLAG, MODE);
+    log_fd = sys_open(log_path, OFLAG2, MODE);
     if (log_fd == -1) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_OPEN_FAILED,
             "Failed to open log file: %s.", hs->path);
         ret = -1;
         goto err;
     }
-    
-    idx_fd = sys_open(idx_path, COFLAG, MODE);
+
+    idx_fd = sys_open(idx_path, CFLAG1, MODE);
     if (idx_fd == -1) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_CREATE_FAILED,
             "Failed to create idx file: %s.", hs->path);
         ret = -1;
         goto err;
-    } 
+    }
 
-    size = sys_pread(log_fd, &super, sizeof(super), offset);
+    size = sys_pread(log_fd, &super, sizeof(super), 0);
     if (size != sizeof(super) || super.version != HSVERSION || gf_uuid_compare(super.gfid, hs->gfid)) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_BROKEN_FILE,
             "Broken super in log file: %s.", hs->path);        
@@ -107,139 +105,128 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
         goto err;
     }
 
-    size = sys_pwrite(idx_fd, &super, sizeof(super), 0);
+    size = sys_write(idx_fd, &super, sizeof(super));
     if (size != sizeof(super)) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_WRITE_FAILED,
             "Failed to write super into idx file: %s.", hs->path);
         ret = -1;
         goto err;
-    }    
+    }
 
-    offset = sizeof(super);
     hs->pos = sizeof(super);
 
-    shift = 0;
     while (_gf_true) {
-        size = sys_pread(log_fd, build_buf+shift, BUFF_SIZE-shift, offset);
+        mem_idx = NULL;
+        den = NULL;
+        idx = NULL;
+
+        size = sys_pread(log_fd, buff, BUFF_SIZE, hs->pos);
         if (size < 0) {
             gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_READ_FAILED,
                 "Failed to read log file: %s.", hs->path);     
             ret = -1;
-            goto err;
-        }
-
-        if (size == 0) {
-            if (shift > 0) {
-                gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_NEEDLE,
-                    "Broken needle: %s.", hs->path);                 
-                ret = -1;
-                goto err;
-            }
+            goto err;            
+        } else if (size == 0) {
             break;
-        }
-
-        /* incomplete needle */
-        if (shift+size < sizeof(*needle)) {
+        } else if (size < sizeof(struct needle)) {
             gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_NEEDLE,
                 "Broken needle: %s.", hs->path);             
             ret = -1;
             goto err;
         }
 
-        left = 0;
-        while (left+sizeof(*needle) <= shift+size) {
-            den = NULL;
-            mem_idx = NULL;
-            needle = (struct needle *)(build_buf+left);
-
-            /* incomplete name or payload */
-            if (left+sizeof(*needle)+needle->name_len+needle->size > shift+size) {
-                memcpy(build_buf, build_buf+left, shift+size-left);
-                shift = shift+size-left;
-                left = 0;
-                break;                
-            }
+        needle = (struct needle *)buff;
 
 #ifdef HAVE_LIB_Z
+        struct hs_private *priv = this->private;
+
+        if (priv->startup_crc_check) {
+            uint32_t crc = 0;
+            uint32_t nsize = sizeof(struct needle) + needle->name_len + needle->size;
+            char *nbuff = alloca(nsize);
+
+            size = sys_pread(log_fd, nbuff, nsize, hs->pos);
+            if (size < 0) {
+                gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_READ_FAILED,
+                    "Failed to read log file: %s.", hs->path);   
+                ret = -1;
+                goto err;
+            } else if (size != nsize) {
+                gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_NEEDLE,
+                    "Broken needle: %s.", hs->path);         
+                ret = -1;
+                goto err;            
+            }
+            
             crc = crc32(0L, Z_NULL, 0);
-            if (priv->startup_crc_check) {
-                crc = crc32(crc, (char *)needle+sizeof(*needle)+needle->name_len, needle->size);
-                if (crc != needle->crc) {
-                    gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_BROKEN_NEEDLE,
-                        "CRC check failed (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
-                    ret = -1;
-                    goto err;
-                }
+            crc = crc32(crc, nbuff+sizeof(struct needle)+needle->name_len, needle->size);
+            if (crc != needle->crc) {
+                gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_BROKEN_NEEDLE,
+                    "CRC check failed (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
+                ret = -1;
+                goto err;
             }
+        }
 #endif
-            mem_idx = mem_idx_init(needle->data, needle->name_len, needle->size, hs->pos);
-            if (!mem_idx) {
-                gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_MEM_IDX_INIT_FAILED,
-                    "Failed to init mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
-                ret = -1;
-                goto err;                  
-            }
-
-            ret = mem_idx_map_put(hs, needle->gfid, mem_idx);
-            if (ret == 0) {
-                gf_msg(this->name, GF_LOG_INFO, 0, H_MSG_MEM_IDX_UPDATE,
-                    "Update mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                 
-            } else if (ret == -1) {
-                gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_MEM_IDX_ADD_FAILED,
-                    "Failed to add mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid)); 
-                ret = -1;
-                goto err;             
-            }            
-
-            den = dentry_init(needle->gfid, (needle->flags & F_DELETED) ? NON_T : REG_T, mem_idx);
-            if (!den) {
-                gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_INIT_FAILED,
-                    "Failed to init dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
-                ret = -1;
-                goto err;                    
-            }
-
-            ret = dentry_map_put(hs, needle->data, den);
-            if (ret == 0) {
-                gf_msg(this->name, GF_LOG_INFO, 0, H_MSG_DENTRY_UPDATE,
-                    "Update dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                
-            } else if (ret == -1) {
-                gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_ADD_FAILED,
-                    "Failed to add dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
-                goto err;
-            }
-
-            idx = idx_from_needle(needle, hs->pos);
-            if (!idx) {
-                gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_IDX_INIT_FAILED,
-                    "Failed to init idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                     
-                ret = -1;
-                goto err;
-            }
-
-            wsize = sys_write(idx_fd, idx, sizeof(*idx)+idx->name_len);
-            if (wsize != sizeof(*idx)+idx->name_len) {
-                gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_WRITE_FAILED,
-                    "Failed to write idx (%s/%s %s) into idx file.", hs->path, idx->name, uuid_utoa(needle->gfid));
-                GF_FREE(idx);
-                ret = -1;
-                goto err;
-            }
-            GF_FREE(idx);
-
-            left += (sizeof(*needle) + needle->name_len + needle->size);
-            hs->pos += (sizeof(*needle) + needle->name_len + needle->size);
-
-            GF_REF_PUT(den);
-            GF_REF_PUT(mem_idx);
+        mem_idx = mem_idx_init(needle->data, needle->name_len, needle->size, hs->pos);
+        if (!mem_idx) {
+            gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_MEM_IDX_INIT_FAILED,
+                "Failed to init mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
+            ret = -1;
+            goto err;                  
         }
 
-        if (left > 0 && left <= shift+size && left+sizeof(*needle) > shift+size) {
-            memcpy(build_buf, build_buf+left, shift+size-left);
-            shift = shift+size-left;         
-        }        
+        ret = mem_idx_map_put(hs, needle->gfid, mem_idx);
+        if (ret == 0) {
+            gf_msg(this->name, GF_LOG_INFO, 0, H_MSG_MEM_IDX_UPDATE,
+                "Update mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                 
+        } else if (ret == -1) {
+            gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_MEM_IDX_ADD_FAILED,
+                "Failed to add mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid)); 
+            ret = -1;
+            goto err;             
+        }            
 
-        offset += size;
+        den = dentry_init(needle->gfid, (needle->flags & F_DELETED) ? NON_T : REG_T, mem_idx);
+        if (!den) {
+            gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_INIT_FAILED,
+                "Failed to init dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
+            ret = -1;
+            goto err;                    
+        }
+
+        ret = dentry_map_put(hs, needle->data, den);
+        if (ret == 0) {
+            gf_msg(this->name, GF_LOG_INFO, 0, H_MSG_DENTRY_UPDATE,
+                "Update dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                
+        } else if (ret == -1) {
+            gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_ADD_FAILED,
+                "Failed to add dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
+            goto err;
+        }
+
+        idx = idx_from_needle(needle, hs->pos);
+        if (!idx) {
+            gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_IDX_INIT_FAILED,
+                "Failed to init idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                     
+            ret = -1;
+            goto err;
+        }
+
+        wsize = sys_write(idx_fd, idx, sizeof(*idx)+idx->name_len);
+        if (wsize != sizeof(*idx)+idx->name_len) {
+            gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_WRITE_FAILED,
+                "Failed to write idx (%s/%s %s) into idx file.", hs->path, idx->name, uuid_utoa(needle->gfid));
+            GF_FREE(idx);
+            ret = -1;
+            goto err;
+        }
+
+        hs->pos += sizeof(struct needle) + needle->name_len + needle->size;
+
+        GF_FREE(idx);
+        GF_REF_PUT(den);
+        GF_REF_PUT(mem_idx);        
     }
 
     hs->log_fd = log_fd;
@@ -263,163 +250,146 @@ err:
     return ret;
 }
 
-int
+static int
 hs_orphan_build(xlator_t *this, struct hs *hs) {
-    int ret = -1;
+    int ret = 0;
     int fd = -1;
-    ssize_t size = -1;
-    char *log_path = NULL;
+    ssize_t size = 0;
+    ssize_t wsize = 0;
+    char *path = NULL;
     struct needle *needle = NULL;
+    struct idx *idx = NULL;    
     struct mem_idx *mem_idx = NULL;
-    struct idx *idx = NULL;
     struct dentry *den = NULL;
-    uint64_t offset = 0;
-    uint64_t left = 0;
-    uint64_t shift = 0;
-    ssize_t wsize = -1;
-    uint32_t crc = 0;
-    struct hs_private *priv = NULL;
+    char buff[BUFF_SIZE] = {0};
 
-    priv = this->private;
-
-    MAKE_LOG_PATH(log_path, this, hs->path);
-    fd = sys_open(log_path, OFLAG, MODE);
-    if (fd == -1) {
+    MAKE_LOG_PATH(path, this, hs->path);
+    fd = sys_open(path, OFLAG2, MODE);
+    if (fd < 0) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_OPEN_FAILED,
-            "Failed to open log file: %s.", hs->path);          
+            "Failed to open log file: %s.", hs->path);
         ret = -1;
-        goto err;
+        goto err;    
     }
 
-    offset = hs->pos;
-
-    shift = 0;
     while (_gf_true) {
-        size = sys_pread(fd, build_buf+shift, BUFF_SIZE-shift, offset);
+        mem_idx = NULL;
+        den = NULL; 
+        idx = NULL;
+
+        size = sys_pread(fd, buff, BUFF_SIZE, hs->pos);
         if (size < 0) {
             gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_READ_FAILED,
                 "Failed to read log file: %s.", hs->path);   
             ret = -1;
             goto err;
+        } else if (size == 0) {
+            break;
+        } else if (size < sizeof(struct needle)) {
+            gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_NEEDLE,
+                "Broken needle: %s.", hs->path);         
+            ret = -1;
+            goto err;            
         }
 
-        if (size == 0) {
-            if (shift > 0) {
+        needle = (struct needle *)buff;
+
+#ifdef HAVE_LIB_Z
+        struct hs_private *priv = this->private;
+
+        if (priv->startup_crc_check) {
+            uint32_t crc = 0;
+            uint32_t nsize = sizeof(struct needle) + needle->name_len + needle->size;
+            char *nbuff = alloca(nsize);
+
+            size = sys_pread(fd, nbuff, nsize, hs->pos);
+            if (size < 0) {
+                gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_READ_FAILED,
+                    "Failed to read log file: %s.", hs->path);   
+                ret = -1;
+                goto err;
+            } else if (size != nsize) {
                 gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_NEEDLE,
-                    "Broken needle: %s.", hs->path);                 
+                    "Broken needle: %s.", hs->path);         
+                ret = -1;
+                goto err;            
+            }
+            
+            crc = crc32(0L, Z_NULL, 0);
+            crc = crc32(crc, nbuff+sizeof(struct needle)+needle->name_len, needle->size);
+            if (crc != needle->crc) {
+                gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_BROKEN_NEEDLE,
+                    "CRC check failed (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
                 ret = -1;
                 goto err;
             }
-            break;
+        }
+#endif
+
+        mem_idx = mem_idx_init(needle->data, needle->name_len, needle->size, hs->pos);
+        if (!mem_idx) {
+            gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_MEM_IDX_INIT_FAILED,
+                "Failed to init mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
+            ret = -1;
+            goto err;                  
         }
 
-        /* incomplete needle */
-        if (shift+size < sizeof(*needle)) {          
-            gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_NEEDLE,
-                "Broken needle: %s.", hs->path);         
+        ret = mem_idx_map_put(hs, needle->gfid, mem_idx);
+        if (ret == 0) {
+            gf_msg(this->name, GF_LOG_INFO, 0, H_MSG_MEM_IDX_UPDATE,
+                "Update mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                 
+        } else if (ret == -1) {
+            gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_MEM_IDX_ADD_FAILED,
+                "Failed to add mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
+            goto err;             
+        }            
+
+        den = dentry_init(needle->gfid, (needle->flags & F_DELETED) ? NON_T : REG_T, mem_idx);
+        if (!den) {
+            gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_INIT_FAILED,
+                "Failed to init dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
+            ret = -1;
+            goto err;                    
+        }
+
+        ret = dentry_map_put(hs, needle->data, den);
+        if (ret == 0) {
+            gf_msg(this->name, GF_LOG_INFO, 0, H_MSG_DENTRY_UPDATE,
+                "Update dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                
+        } else if (ret == -1) {
+            gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_ADD_FAILED,
+                "Failed to add dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
+            goto err;
+        }
+
+        idx = idx_from_needle(needle, hs->pos);
+        if (!idx) {
+            gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_IDX_INIT_FAILED,
+                "Failed to init idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                     
             ret = -1;
             goto err;
         }
 
-        left = 0;
-        while (left+sizeof(*needle) <= shift+size) {
-            den = NULL;
-            mem_idx = NULL;
-            needle = (struct needle *)(build_buf+left);
-
-            /* incomplete name or payload */
-            if (left+sizeof(*needle)+needle->name_len+needle->size > shift+size) {
-                memcpy(build_buf, build_buf+left, shift+size-left);
-                shift = shift+size-left;
-                left = 0;
-                break;           
-            }
-
-#ifdef HAVE_LIB_Z
-            crc = crc32(0L, Z_NULL, 0);
-            if (priv->startup_crc_check) {
-                crc = crc32(crc, (char *)needle+sizeof(*needle)+needle->name_len, needle->size);
-                if (crc != needle->crc) {
-                    gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_BROKEN_NEEDLE,
-                        "CRC check failed (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
-                    ret = -1;
-                    goto err;
-                }
-            }
-#endif
-            mem_idx = mem_idx_init(needle->data, needle->name_len, needle->size, hs->pos);
-            if (!mem_idx) {
-                gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_MEM_IDX_INIT_FAILED,
-                    "Failed to init mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
-                ret = -1;
-                goto err;                  
-            }
-
-            ret = mem_idx_map_put(hs, needle->gfid, mem_idx);
-            if (ret == 0) {
-                gf_msg(this->name, GF_LOG_INFO, 0, H_MSG_MEM_IDX_UPDATE,
-                    "Update mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                 
-            } else if (ret == -1) {
-                gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_MEM_IDX_ADD_FAILED,
-                    "Failed to add mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid)); 
-                ret = -1;
-                goto err;             
-            }            
-
-            den = dentry_init(needle->gfid, (needle->flags & F_DELETED) ? NON_T : REG_T, mem_idx);
-            if (!den) {
-                gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_INIT_FAILED,
-                    "Failed to init dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
-                ret = -1;
-                goto err;                    
-            }
-
-            ret = dentry_map_put(hs, needle->data, den);
-            if (ret == 0) {
-                gf_msg(this->name, GF_LOG_INFO, 0, H_MSG_DENTRY_UPDATE,
-                    "Update dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                
-            } else if (ret == -1) {
-                gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_ADD_FAILED,
-                    "Failed to add dentry (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
-                goto err;
-            }
-
-            idx = idx_from_needle(needle, hs->pos);
-            if (!idx) {
-                gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_IDX_INIT_FAILED,
-                    "Failed to init idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                     
-                ret = -1;
-                goto err;
-            }
-
-            wsize = sys_write(hs->idx_fd, idx, sizeof(*idx)+idx->name_len);
-            if (wsize != sizeof(*idx)+idx->name_len) {
-                gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_WRITE_FAILED,
-                    "Failed to write idx (%s/%s %s) into idx file.", hs->path, idx->name, uuid_utoa(needle->gfid));
-                GF_FREE(idx);
-                ret = -1;
-                goto err;
-            }
+        wsize = sys_write(hs->idx_fd, idx, sizeof(*idx)+idx->name_len);
+        if (wsize != sizeof(*idx)+idx->name_len) {
+            gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_WRITE_FAILED,
+                "Failed to write idx (%s/%s %s) into idx file.", hs->path, idx->name, uuid_utoa(needle->gfid));
             GF_FREE(idx);
-
-            left += (sizeof(*needle) + needle->name_len + needle->size); 
-            hs->pos += (sizeof(*needle) + needle->name_len + needle->size);
-
-            GF_REF_PUT(den);
-            GF_REF_PUT(mem_idx);
+            ret = -1;
+            goto err;
         }
 
-        if (left > 0 && left <= shift+size && left+sizeof(*needle) > shift+size) {
-            memcpy(build_buf, build_buf+left, shift+size-left);
-            shift = shift+size-left;         
-        }
-
-        offset += size;
+        hs->pos += sizeof(struct needle) + needle->name_len + needle->size;
+        
+        GF_FREE(idx);
+        GF_REF_PUT(den);
+        GF_REF_PUT(mem_idx);
     }
 
     hs->log_fd = fd;
     
-    return 0;
+    return 0;    
+
 err:
     if (fd >= 0)
         sys_close(fd);
@@ -434,142 +404,114 @@ err:
     mem_idx_map_clear(hs);
     dentry_map_clear(hs);
 
-    return ret;
+    return ret;    
 }
 
 static int
 hs_quick_build(xlator_t *this, struct hs *hs) {
+    int ret = 0;
     int fd = -1;
-    int ret = -1;
-    char *idx_path = NULL;
+    int op_ret = -1;
+    ssize_t size = 0;
+    char *path = NULL;
     struct stat stbuf = {0};
-    ssize_t size = -1;
     struct super super = {0};
     struct idx *idx = NULL;
     struct mem_idx *mem_idx = NULL;
     struct dentry *den = NULL;
+    char buff[BUFF_SIZE] = {0};
     uint64_t offset = 0;
-    uint64_t left = 0;
-    uint64_t shift = 0;
 
-    MAKE_IDX_PATH(idx_path, this, hs->path);
-    ret = sys_stat(idx_path, &stbuf);
-    if (ret != 0) {
+    MAKE_IDX_PATH(path, this, hs->path);
+    op_ret = sys_stat(path, &stbuf);
+    if (op_ret != 0) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_STAT_FAILED,
             "Idx file stat failed: %s.", hs->path);
         ret = -1;     
         goto err;
     }
 
-    fd = sys_open(idx_path, OFLAG, MODE);
-    if (fd == -1) {
+    fd = sys_open(path, OFLAG1, MODE);
+    if (fd < 0) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_OPEN_FAILED,
             "Failed to open idx file: %s.", hs->path);        
         ret = -1;
-        goto err;
+        goto err;        
     }
 
-    size = sys_pread(fd, &super, sizeof(super), offset);
+    size = sys_pread(fd, &super, sizeof(super), 0);
     if (size != sizeof(super) || super.version != HSVERSION || gf_uuid_compare(super.gfid, hs->gfid)) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_BROKEN_FILE,
             "Broken super in idx file: %s.", hs->path);
         ret = -1;
         goto err;
-    }
+    } 
 
     offset = sizeof(super);
     hs->pos = sizeof(super);
 
-    shift = 0;
     while (_gf_true) {
-        size = sys_pread(fd, build_buf+shift, BUFF_SIZE-shift, offset);
+        mem_idx = NULL;
+        den = NULL;
+
+        size = sys_pread(fd, buff, BUFF_SIZE, offset);
         if (size < 0) {
             gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_READ_FAILED,
                 "Failed to read idx file: %s.", hs->path);               
             ret = -1;
             goto err;
-        }
-
-        if (size == 0) { 
-            if (shift > 0) {
-                gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_IDX,
-                    "Broken idx: %s.", hs->path); 
-                sys_ftruncate(fd, offset-shift);
-            }
+        } else if (size == 0) {
             break;
-        }
-
-        if (shift+size < sizeof(*idx)) {
+        } else if (size < sizeof(struct idx)) {
             gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_IDX,
                 "Broken idx: %s.", hs->path); 
-            sys_ftruncate(fd, offset-shift);
-            break;
+            sys_ftruncate(fd, offset);
+            break;            
         }
 
-        left = 0;
-        while (left+sizeof(*idx) <= shift+size) {
-            den = NULL;
-            mem_idx = NULL;
-            idx = (struct idx *)(build_buf+left);
+        idx = (struct idx *)buff;
 
-            /* incomplete name */
-            if (left+sizeof(*idx)+idx->name_len > shift+size) {
-                memcpy(build_buf, build_buf+left, shift+size-left);
-                shift = shift+size-left;
-                left = 0;
-                break;
-            }
-
-            mem_idx = mem_idx_init(idx->name, idx->name_len, idx->size, idx->offset);
-            if (!mem_idx) {
-                gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_MEM_IDX_INIT_FAILED,
-                    "Failed to init mem idx (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));
-                ret = -1;
-                goto err;
-            }
-
-            ret = mem_idx_map_put(hs, idx->gfid, mem_idx);
-            if (ret == 0) {
-                gf_msg(this->name, GF_LOG_INFO, 0, H_MSG_MEM_IDX_UPDATE,
-                    "Update mem idx (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));                 
-            } else if (ret == -1) {
-                gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_MEM_IDX_ADD_FAILED,
-                    "Failed to add mem idx (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid)); 
-                ret = -1;
-                goto err;             
-            }            
-
-            den = dentry_init(idx->gfid, (idx->offset > 0) ? REG_T : NON_T, mem_idx);
-            if (!den) {
-                gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_INIT_FAILED,
-                    "Failed to init dentry (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));
-                ret = -1;
-                goto err;                    
-            }
-
-            ret = dentry_map_put(hs, idx->name, den);
-            if (ret == 0) {
-                gf_msg(this->name, GF_LOG_INFO, 0, H_MSG_DENTRY_UPDATE,
-                    "Update dentry (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));                
-            } else if (ret == -1) {
-                gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_ADD_FAILED,
-                    "Failed to add dentry (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));
-                goto err;
-            }
-
-            left += (sizeof(*idx) + idx->name_len);
-            hs->pos = idx->offset + sizeof(struct needle) + idx->name_len + idx->size;
-
-            GF_REF_PUT(den);
-            GF_REF_PUT(mem_idx);
+        mem_idx = mem_idx_init(idx->name, idx->name_len, idx->size, idx->offset);
+        if (!mem_idx) {
+            gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_MEM_IDX_INIT_FAILED,
+                "Failed to init mem idx (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));
+            ret = -1;
+            goto err;
         }
 
-        if (left > 0 && left <= shift+size && left+sizeof(*idx) > shift+size) {
-            memcpy(build_buf, build_buf+left, shift+size-left);
-            shift = shift+size-left;
+        ret = mem_idx_map_put(hs, idx->gfid, mem_idx);
+        if (ret == 0) {
+            gf_msg(this->name, GF_LOG_INFO, 0, H_MSG_MEM_IDX_UPDATE,
+                "Update mem idx (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));   
+        } else if (ret == -1) {
+            gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_MEM_IDX_ADD_FAILED,
+                "Failed to add mem idx (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid)); 
+            goto err;             
+        }            
+
+        den = dentry_init(idx->gfid, (idx->offset != F_DELETED) ? REG_T : NON_T, mem_idx);
+        if (!den) {
+            gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_INIT_FAILED,
+                "Failed to init dentry (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));
+            ret = -1;
+            goto err;                    
         }
 
-        offset += size;
+        ret = dentry_map_put(hs, idx->name, den);
+        if (ret == 0) {
+            gf_msg(this->name, GF_LOG_INFO, 0, H_MSG_DENTRY_UPDATE,
+                "Update dentry (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));                
+        } else if (ret == -1) {
+            gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_DENTRY_ADD_FAILED,
+                "Failed to add dentry (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));
+            goto err;
+        }
+
+        hs->pos = idx->offset + sizeof(struct needle) + idx->name_len + idx->size;
+        offset += sizeof(struct idx) + idx->name_len;
+
+        GF_REF_PUT(den);
+        GF_REF_PUT(mem_idx);
     }
 
     hs->idx_fd = fd;
@@ -605,7 +547,7 @@ hs_scratch(xlator_t *this, struct hs *parent, struct hs *hs) {
     gf_uuid_copy(super.gfid, hs->gfid);
 
     MAKE_LOG_PATH(log_path, this, hs->path);
-    log_fd = sys_open(log_path, COFLAG, MODE);
+    log_fd = sys_open(log_path, CFLAG2, MODE);
     if (log_fd == -1) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_CREATE_FAILED,
             "Failed to create log file: %s.", hs->path);
@@ -613,7 +555,7 @@ hs_scratch(xlator_t *this, struct hs *parent, struct hs *hs) {
         goto err;
     }
 
-    size = sys_pwrite(log_fd, &super, sizeof(super), 0);
+    size = sys_write(log_fd, &super, sizeof(super));
     if (size != sizeof(super)) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_WRITE_FAILED,
             "Failed to write super into log file: %s.", hs->path);
@@ -622,7 +564,7 @@ hs_scratch(xlator_t *this, struct hs *parent, struct hs *hs) {
     }  
     
     MAKE_IDX_PATH(idx_path, this, hs->path);
-    idx_fd = sys_open(idx_path, COFLAG, MODE);
+    idx_fd = sys_open(idx_path, CFLAG1, MODE);
     if (idx_fd == -1) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_CREATE_FAILED,
             "Failed to create idx file: %s.", hs->path);
@@ -630,7 +572,7 @@ hs_scratch(xlator_t *this, struct hs *parent, struct hs *hs) {
         goto err;
     }
 
-    size = sys_pwrite(idx_fd, &super, sizeof(super), 0);
+    size = sys_write(idx_fd, &super, sizeof(super));
     if (size != sizeof(super)) {
         gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_WRITE_FAILED,
             "Failed to write super into idx file: %s.", hs->path);
@@ -727,13 +669,8 @@ hs_build(xlator_t *this, struct hs *parent, struct hs *hs) {
         goto err;
     }
 
-    ret = hs_quick_build(this, hs);
+    ret = (hs_quick_build(this, hs) < 0) ? hs_slow_build(this, hs) : hs_orphan_build(this, hs);
     if (ret < 0)
-        ret = hs_slow_build(this, hs);
-    else
-        ret = hs_orphan_build(this, hs);
-
-    if (ret != 0)
         goto err;
 
     den = dentry_init(hs->gfid, DIR_T, NULL);
