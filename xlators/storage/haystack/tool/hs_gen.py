@@ -45,10 +45,11 @@ def fill_super(fd, gfid):
 
 def fill_files(parpath, gfid):
     log_fd = open(parpath + "/.log", "w+")
-    idx_fd = open(parpath + "/.idx", "w+")
-
     fill_super(log_fd, gfid)
-    fill_super(idx_fd, gfid)
+
+    if not SLOW:
+        idx_fd = open(parpath + "/.idx", "w+")
+        fill_super(idx_fd, gfid)
 
     offset = struct.calcsize(SUPER_FMT)
 
@@ -70,7 +71,8 @@ def fill_files(parpath, gfid):
         offset = offset + len(needle)
     
     log_fd.close()
-    idx_fd.close()
+    if not SLOW:
+        idx_fd.close()
 
 def gen_dir(parpath, path, gfid, level):
     if level > LEVELS:

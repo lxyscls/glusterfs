@@ -143,17 +143,26 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
         if (priv->startup_crc_check) {
             uint32_t crc = 0;
             uint32_t nsize = sizeof(struct needle) + needle->name_len + needle->size;
-            char *nbuff = alloca(nsize);
+            
+            char *nbuff = GF_CALLOC(1, nsize, gf_hs_mt_crc_buf);
+            if (!nbuff) {
+                gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
+                    "Failed to alloc crc buf: %s.", hs->path);
+                ret = -1;
+                goto err;
+            }
 
             size = sys_pread(log_fd, nbuff, nsize, hs->pos);
             if (size < 0) {
                 gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_READ_FAILED,
-                    "Failed to read log file: %s.", hs->path);   
+                    "Failed to read log file: %s.", hs->path);
+                GF_FREE(nbuff);
                 ret = -1;
                 goto err;
             } else if (size != nsize) {
                 gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_NEEDLE,
-                    "Broken needle: %s.", hs->path);         
+                    "Broken needle: %s.", hs->path);
+                GF_FREE(nbuff);
                 ret = -1;
                 goto err;            
             }
@@ -163,9 +172,12 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
             if (crc != needle->crc) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_BROKEN_NEEDLE,
                     "CRC check failed (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
+                GF_FREE(nbuff);
                 ret = -1;
                 goto err;
             }
+
+            GF_FREE(nbuff);
         }
 #endif
         mem_idx = mem_idx_init(needle->data, needle->name_len, needle->size, hs->pos);
@@ -300,17 +312,26 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
         if (priv->startup_crc_check) {
             uint32_t crc = 0;
             uint32_t nsize = sizeof(struct needle) + needle->name_len + needle->size;
-            char *nbuff = alloca(nsize);
+            
+            char *nbuff = GF_CALLOC(1, nsize, gf_hs_mt_crc_buf);
+            if (!nbuff) {
+                gf_msg(this->name, GF_LOG_ERROR, ENOMEM, H_MSG_NOMEM,
+                    "Failed to alloc crc buf: %s.", hs->path);
+                ret = -1;
+                goto err;
+            }
 
             size = sys_pread(fd, nbuff, nsize, hs->pos);
             if (size < 0) {
                 gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_READ_FAILED,
-                    "Failed to read log file: %s.", hs->path);   
+                    "Failed to read log file: %s.", hs->path);
+                GF_FREE(nbuff);
                 ret = -1;
                 goto err;
             } else if (size != nsize) {
                 gf_msg(this->name, GF_LOG_WARNING, 0, H_MSG_BROKEN_NEEDLE,
-                    "Broken needle: %s.", hs->path);         
+                    "Broken needle: %s.", hs->path);
+                GF_FREE(nbuff);
                 ret = -1;
                 goto err;            
             }
@@ -320,9 +341,12 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
             if (crc != needle->crc) {
                 gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_BROKEN_NEEDLE,
                     "CRC check failed (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
+                GF_FREE(nbuff);
                 ret = -1;
                 goto err;
             }
+
+            GF_FREE(nbuff);
         }
 #endif
 
