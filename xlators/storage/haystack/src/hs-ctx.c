@@ -89,6 +89,10 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
         goto err;
     }
 
+#if _XOPEN_SOURCE >= 600 || _POSIX_C_SOURCE >= 200112L
+    posix_fadvise(log_fd, 0, 0, POSIX_FADV_SEQUENTIAL);
+#endif    
+
     idx_fd = sys_open(idx_path, CFLAG1, MODE);
     if (idx_fd == -1) {
         gf_msg(this->name, GF_LOG_ERROR, errno, H_MSG_CREATE_FAILED,
@@ -96,6 +100,10 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
         ret = -1;
         goto err;
     }
+
+#if _XOPEN_SOURCE >= 600 || _POSIX_C_SOURCE >= 200112L
+    posix_fadvise(idx_fd, 0, 0, POSIX_FADV_SEQUENTIAL);
+#endif
 
     size = sys_pread(log_fd, &super, sizeof(super), 0);
     if (size != sizeof(super) || super.version != HSVERSION || gf_uuid_compare(super.gfid, hs->gfid)) {
@@ -284,6 +292,10 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
         goto err;    
     }
 
+#if _XOPEN_SOURCE >= 600 || _POSIX_C_SOURCE >= 200112L
+    posix_fadvise(fd, 0, 0, POSIX_FADV_SEQUENTIAL);
+#endif    
+
     while (_gf_true) {
         mem_idx = NULL;
         den = NULL; 
@@ -462,6 +474,10 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
         ret = -1;
         goto err;        
     }
+
+#if _XOPEN_SOURCE >= 600 || _POSIX_C_SOURCE >= 200112L
+    posix_fadvise(fd, 0, 0, POSIX_FADV_SEQUENTIAL);
+#endif
 
     size = sys_pread(fd, &super, sizeof(super), 0);
     if (size != sizeof(super) || super.version != HSVERSION || gf_uuid_compare(super.gfid, hs->gfid)) {
@@ -851,8 +867,13 @@ hs_init(xlator_t *this, struct hs *parent, const char *path, gf_boolean_t scratc
             gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_HS_BUILD_FAILED,
                 "Failed to build haystack: %s.", path);
             goto err;
-        }
+        }      
     }
+
+#if _XOPEN_SOURCE >= 600 || _POSIX_C_SOURCE >= 200112L
+    posix_fadvise(hs->log_fd, 0, 0, POSIX_FADV_NORMAL);
+    posix_fadvise(hs->idx_fd, 0, 0, POSIX_FADV_SEQUENTIAL);
+#endif
 
     if (parent) {
         hs->parent = GF_REF_GET(parent);
