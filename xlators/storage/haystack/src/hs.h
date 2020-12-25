@@ -14,6 +14,7 @@
 #include <glusterfs/stack.h>
 #include <glusterfs/xlator.h>
 #include <glusterfs/dict.h>
+#include <glusterfs/atomic.h>
 
 #include "khash.h"
 
@@ -92,6 +93,8 @@ struct hs {
 
     uuid_t gfid;
     char *path;
+
+    gf_atomic_t fcnt;
 
     pthread_rwlock_t lock;
     struct hs *parent;

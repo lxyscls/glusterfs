@@ -111,10 +111,7 @@ idx_from_needle(struct needle *needle, uint64_t offset) {
     gf_uuid_copy(idx->gfid, needle->gfid);
     idx->name_len = needle->name_len;
     idx->size = needle->size;
-    if (needle->flags & F_DELETED)
-        idx->offset = 0;
-    else
-        idx->offset = offset;
+    idx->offset = offset;
     gf_strncpy(idx->name, needle->data, needle->name_len);
 
 out:

@@ -24,6 +24,7 @@
 #include <glusterfs/list.h>
 #include <glusterfs/xlator.h>
 #include <glusterfs/inode.h>
+#include <glusterfs/atomic.h>
 
 #include "hs.h"
 #include "hs-ctx.h"
@@ -188,7 +189,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
             GF_FREE(nbuff);
         }
 #endif
-        mem_idx = mem_idx_init(needle->data, needle->name_len, needle->size, hs->pos);
+        mem_idx = mem_idx_init(needle->data, needle->name_len, needle->size, (needle->flags & F_DELETED) ? F_DELETED : hs->pos);
         if (!mem_idx) {
             gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_MEM_IDX_INIT_FAILED,
                 "Failed to init mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
@@ -225,7 +226,7 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
             goto err;
         }
 
-        idx = idx_from_needle(needle, hs->pos);
+        idx = idx_from_needle(needle, (needle->flags & F_DELETED) ? F_DELETED : hs->pos);
         if (!idx) {
             gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_IDX_INIT_FAILED,
                 "Failed to init idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                     
@@ -241,6 +242,11 @@ hs_slow_build(xlator_t *this, struct hs *hs) {
             ret = -1;
             goto err;
         }
+
+        if (needle->flags & F_DELETED)
+            GF_ATOMIC_DEC(hs->fcnt);
+        else
+            GF_ATOMIC_INC(hs->fcnt);        
 
         hs->pos += sizeof(struct needle) + needle->name_len + needle->size;
 
@@ -362,7 +368,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
         }
 #endif
 
-        mem_idx = mem_idx_init(needle->data, needle->name_len, needle->size, hs->pos);
+        mem_idx = mem_idx_init(needle->data, needle->name_len, needle->size, (needle->flags & F_DELETED) ? F_DELETED : hs->pos);
         if (!mem_idx) {
             gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_MEM_IDX_INIT_FAILED,
                 "Failed to init mem idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));
@@ -398,7 +404,7 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
             goto err;
         }
 
-        idx = idx_from_needle(needle, hs->pos);
+        idx = idx_from_needle(needle, (needle->flags & F_DELETED) ? F_DELETED : hs->pos);
         if (!idx) {
             gf_msg(this->name, GF_LOG_ERROR, 0, H_MSG_IDX_INIT_FAILED,
                 "Failed to init idx (%s/%s %s).", hs->path, needle->data, uuid_utoa(needle->gfid));                     
@@ -414,6 +420,11 @@ hs_orphan_build(xlator_t *this, struct hs *hs) {
             ret = -1;
             goto err;
         }
+
+        if (needle->flags & F_DELETED)
+            GF_ATOMIC_DEC(hs->fcnt);
+        else
+            GF_ATOMIC_INC(hs->fcnt);        
 
         hs->pos += sizeof(struct needle) + needle->name_len + needle->size;
         
@@ -546,6 +557,11 @@ hs_quick_build(xlator_t *this, struct hs *hs) {
                 "Failed to add dentry (%s/%s %s).", hs->path, idx->name, uuid_utoa(idx->gfid));
             goto err;
         }
+
+        if (idx->offset != F_DELETED)
+            GF_ATOMIC_INC(hs->fcnt);
+        else
+            GF_ATOMIC_DEC(hs->fcnt);
 
         hs->pos = idx->offset + sizeof(struct needle) + idx->name_len + idx->size;
         offset += sizeof(struct idx) + idx->name_len;
@@ -766,7 +782,7 @@ err:
 void
 hs_dump(khash_t(hs) *map, const char *k, struct hs *v) {
     if (k && v) {
-        printf("%s : %s, %d needles %d buckets\n", k, v->path, kh_size(v->map), kh_n_buckets(v->map));
+        printf("%s : %s, %d needles %d buckets\n", k, v->path, GF_ATOMIC_GET(v->fcnt), kh_n_buckets(v->map));
     }
 
 #ifdef IDXDUMP
@@ -835,6 +851,7 @@ hs_init(xlator_t *this, struct hs *parent, const char *path, gf_boolean_t scratc
 
     gf_uuid_copy(hs->gfid, gfid);
     hs->path = gf_strdup(path);
+    GF_ATOMIC_INIT(hs->fcnt, 0);    
 
     mem_idx_map_init(hs);
     if (!hs->map) {
